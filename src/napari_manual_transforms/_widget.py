@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 from napari.layers import Image
@@ -20,27 +20,27 @@ if TYPE_CHECKING:
 class LayerFollower(QWidget):
     def __init__(self, viewer: napari.viewer.Viewer, parent=None) -> None:
         assert viewer
-        self._viewer: Optional[napari.Viewer] = None
-        self._active: Optional[napari.layers.Layer] = None
+        self._viewer: napari.Viewer | None = None
+        self._active: napari.layers.Layer | None = None
         super().__init__(parent)
         self._connect_viewer(viewer)
 
     # viewer connections
 
-    def _connect_viewer(self, viewer: napari.Viewer):
+    def _connect_viewer(self, viewer: napari.Viewer) -> None:
         self._viewer = viewer
         sel_events = viewer.layers.selection.events
         sel_events.active.connect(self._on_active_layer_change)
         if active := viewer.layers.selection.active:
             self._connect_layer(active)
 
-    def _disconnect_viewer(self):
+    def _disconnect_viewer(self) -> None:
         if self._viewer is not None:
             sel_events = self._viewer.layers.selection.events
             sel_events.changed.disconnect(self._on_active_layer_change)
         self._viewer = None
 
-    def _on_active_layer_change(self, event: Event):
+    def _on_active_layer_change(self, event: Event) -> None:
         if self._active is not None:
             self._disconnect_layer()
         if event.value is not None:
@@ -48,16 +48,16 @@ class LayerFollower(QWidget):
 
     # layer connections
 
-    def _connect_layer(self, layer: napari.layers.Layer):
+    def _connect_layer(self, layer: napari.layers.Layer) -> None:
         self._active = layer
         layer.events.connect(self._on_layer_event)
 
-    def _disconnect_layer(self):
+    def _disconnect_layer(self) -> None:
         if self._active is not None:
             self._active.events.disconnect(self._on_layer_event)
         self._active = None
 
-    def _on_layer_event(self, event):
+    def _on_layer_event(self, event) -> None:
         # layer = event.source
         # attr = event.type
         # value = getattr(layer, attr, None)
@@ -65,14 +65,16 @@ class LayerFollower(QWidget):
 
     # cleanup
 
-    def __del__(self):
+    def __del__(self) -> None:
         with contextlib.suppress(Exception):
             self._disconnect_viewer()
             self._disconnect_layer()
 
 
 class RotationWidget(LayerFollower, RotationView):
-    def __init__(self, viewer: napari.viewer.Viewer = None, parent=None):
+    def __init__(
+        self, viewer: napari.viewer.Viewer = None, parent=None
+    ) -> None:
         self._help = QLabel("(hold alt while dragging canvas to edit)")
         self._help.setStyleSheet(
             "font-size: 9pt; color: #AAA; text-align: center;"
@@ -99,20 +101,20 @@ class RotationWidget(LayerFollower, RotationView):
         self._model.valueChanged.connect(self._on_model_changed)
         self._on_model_changed()
 
-    def _connect_viewer(self, viewer: napari.Viewer):
+    def _connect_viewer(self, viewer: napari.Viewer) -> None:
         super()._connect_viewer(viewer)
         viewer.mouse_drag_callbacks.append(self._on_mouse_drag)
 
-    def _disconnect_viewer(self):
+    def _disconnect_viewer(self) -> None:
         if self._viewer is not None:
             with contextlib.suppress(Exception):
                 self._viewer.mouse_drag_callbacks.remove(self._on_mouse_drag)
         super()._disconnect_viewer()
 
-    def _on_model_changed(self):
+    def _on_model_changed(self) -> None:
         self._update_active()
 
-    def _center_origin(self):
+    def _center_origin(self) -> None:
         if self._active is not None:
             self._model.origin = np.asarray(self._active.data.shape) // 2
 
@@ -152,24 +154,24 @@ class RotationWidget(LayerFollower, RotationView):
             self._model.quaternion = _q
             yield
 
-    def _on_layer_event(self, event):
+    def _on_layer_event(self, event) -> None:
         if event.type == "affine":
             self._update_from_layer()
 
-    def _update_from_layer(self):
+    def _update_from_layer(self) -> None:
         if self._active is not None:
             self._model.matrix = self._active.affine.affine_matrix[:3, :3]
 
-    def _connect_layer(self, layer: napari.layers.Layer):
+    def _connect_layer(self, layer: napari.layers.Layer) -> None:
         super()._connect_layer(layer)
         self._update_from_layer()
         self._help.show()
 
-    def _disconnect_layer(self):
+    def _disconnect_layer(self) -> None:
         super()._disconnect_layer()
         self._help.hide()
 
-    def _resample(self):
+    def _resample(self) -> None:
         if self._active is not None:
             data, translate = transform_array_3d(
                 self._active.data, self._model.matrix, self._model.origin

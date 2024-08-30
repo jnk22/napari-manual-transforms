@@ -1,9 +1,13 @@
-from collections.abc import Sequence
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 from psygnal import Signal
 from pytransform3d import rotations as rot
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # code from three.js ... haven't dug into the differences between
@@ -68,6 +72,7 @@ def _mat2euler(R, order="XYZ"):
             _y = 0
             _z = np.arctan2(R[1, 0], R[0, 0])
         return (_z, _y, _x)
+    return None
 
 
 class RotationModel:
@@ -76,9 +81,9 @@ class RotationModel:
     def __init__(
         self,
         *,
-        axis_angle: Optional[Sequence[float]] = None,
-        quaternion: Optional[Sequence[float]] = None,
-        matrix: Optional[np.ndarray] = None,
+        axis_angle: Sequence[float] | None = None,
+        quaternion: Sequence[float] | None = None,
+        matrix: np.ndarray | None = None,
     ) -> None:
         self._q = np.array([1, 0, 0, 0])
         self._rotation_axis = (0, 1, 0)
@@ -93,7 +98,7 @@ class RotationModel:
     def __repr__(self) -> str:
         return f"RotationModel(quaternion={self._q})"
 
-    def _update_rotation_axis(self):
+    def _update_rotation_axis(self) -> None:
         w, x, y, z = self._q
         sin = np.sin(np.arccos(w))
         if sin >= 0.01 or sin <= -0.01:
@@ -107,7 +112,7 @@ class RotationModel:
 
     @property
     def rotation_vector(self):
-        """Full rotation vector, including origin"""
+        """Full rotation vector, including origin."""
         return np.stack([self.origin, self.rotation_axis])
 
     @property
@@ -115,8 +120,8 @@ class RotationModel:
         return self._q
 
     @quaternion.setter
-    def quaternion(self, q: Sequence[float]):
-        """w,x,y,z"""
+    def quaternion(self, q: Sequence[float]) -> None:
+        """w,x,y,z."""
         self._q = rot.check_quaternion(q, unit=False)
         self._update_rotation_axis()
         self.valueChanged.emit()
@@ -128,8 +133,8 @@ class RotationModel:
         return a
 
     @axis_angle.setter
-    def axis_angle(self, a):
-        """Axis of rotation and rotation angle: (x, y, z, angle)"""
+    def axis_angle(self, a) -> None:
+        """Axis of rotation and rotation angle: (x, y, z, angle)."""
         self.quaternion = rot.quaternion_from_axis_angle(a)
 
     @property
@@ -137,7 +142,7 @@ class RotationModel:
         return rot.matrix_from_quaternion(self._q)
 
     @matrix.setter
-    def matrix(self, R):
+    def matrix(self, R) -> None:
         self.quaternion = rot.quaternion_from_matrix(R)
 
     @property
@@ -146,7 +151,7 @@ class RotationModel:
         return _mat2euler(self.matrix, order="XYZ")
 
     @euler_xyz.setter
-    def euler_xyz(self, e_xyz):
+    def euler_xyz(self, e_xyz) -> None:
         # self.matrix = rot.matrix_from_euler_xyz(e_xyz)
         self.quaternion = _euler2quat(*e_xyz, order="xyz")
 
@@ -155,7 +160,7 @@ class RotationModel:
         return rot.euler_zyx_from_matrix(self.matrix)
 
     @euler_zyx.setter
-    def euler_zyx(self, e_zyx):
+    def euler_zyx(self, e_zyx) -> None:
         self.quaternion = _euler2quat(*list(e_zyx)[::-1], order="zyx")
 
     @property
@@ -163,7 +168,7 @@ class RotationModel:
         return rot.compact_axis_angle_from_quaternion(self._q)
 
     @compact_axis_angle.setter
-    def compact_axis_angle(self, ca):
+    def compact_axis_angle(self, ca) -> None:
         self.quaternion = rot.quaternion_from_compact_axis_angle(ca)
 
     @property
@@ -183,13 +188,14 @@ class RotationModel:
         T[:3, -1] = self.origin
         return T @ M @ np.linalg.inv(T)
 
-    def _set_qwxyz(self, v: float, idx: int):
+    def _set_qwxyz(self, v: float, idx: int) -> bool | None:
         """Set single value of quaternion."""
         if idx == 0:
             assert -1 <= v <= 1
             sint = np.sin((np.arccos(v) * 2) / 2)
-            self.quaternion = (v,) + tuple(
-                np.asarray(self.rotation_axis) * sint
+            self.quaternion = (
+                v,
+                *tuple(np.asarray(self.rotation_axis) * sint),
             )
             return None
 
@@ -215,5 +221,5 @@ class RotationModel:
             rot_axis[i1] = np.sign(b) * np.sqrt((1 - ratio) * rest)
         rot_axis[idx] = sinv
 
-        self.quaternion = (w,) + tuple(np.asarray(rot_axis) * sinarcw)
+        self.quaternion = (w, *tuple(np.asarray(rot_axis) * sinarcw))
         return True

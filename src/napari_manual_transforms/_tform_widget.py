@@ -1,5 +1,6 @@
-from collections.abc import Sequence
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, NoReturn
 
 import numpy as np
 from qtpy.QtCore import Qt
@@ -17,9 +18,12 @@ from superqt import QCollapsible, QLabeledDoubleSlider, QLabeledSlider, utils
 
 from ._model import RotationModel
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 class _RotationComponent(QWidget):
-    def __init__(self, model: RotationModel, parent=None):
+    def __init__(self, model: RotationModel, parent=None) -> None:
         super().__init__(parent)
 
         lay = QFormLayout()
@@ -35,18 +39,18 @@ class _RotationComponent(QWidget):
     def model(self):
         return self._model
 
-    def _update(self):
+    def _update(self) -> NoReturn:
         raise NotImplementedError
 
-    def _add_gui(self):
+    def _add_gui(self) -> NoReturn:
         raise NotImplementedError
 
 
 class QuaternionView(_RotationComponent):
     _q: Sequence[float]
 
-    def _add_gui(self):
-        self._sliders: List[QLabeledDoubleSlider] = []
+    def _add_gui(self) -> None:
+        self._sliders: list[QLabeledDoubleSlider] = []
         for i in "wxyz":
             wdg = QLabeledDoubleSlider(Qt.Orientation.Horizontal)
             wdg.setRange(-1, 1)
@@ -60,21 +64,21 @@ class QuaternionView(_RotationComponent):
             with utils.signals_blocked(sld):
                 sld.setValue(v)
 
-    def _on_change(self, value):
+    def _on_change(self, value) -> None:
         idx = self._sliders.index(self.sender())
         if not self._model._set_qwxyz(value, idx):
             self._update()
 
 
 class EulerView(QWidget):
-    def __init__(self, model: RotationModel, parent=None):
+    def __init__(self, model: RotationModel, parent=None) -> None:
         super().__init__(parent)
         self._add_gui()
         self._model = model
         self._model.valueChanged.connect(self._update)
         self._update()
 
-    def _add_gui(self):
+    def _add_gui(self) -> None:
         self.setLayout(QVBoxLayout())
 
         self._box = QComboBox()
@@ -91,7 +95,7 @@ class EulerView(QWidget):
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
 
-        self._sliders: List[QLabeledDoubleSlider] = []
+        self._sliders: list[QLabeledDoubleSlider] = []
         for i in "xyz":
             wdg = QLabeledDoubleSlider(Qt.Orientation.Horizontal)
             wdg.setRange(-180, 180)
@@ -115,7 +119,7 @@ class EulerView(QWidget):
             with utils.signals_blocked(sld):
                 sld.setValue(np.rad2deg(v))
 
-    def _on_change(self):
+    def _on_change(self) -> None:
         order = self._box.currentText().lower()
         xyz = [np.deg2rad(s.value()) for s in self._sliders]
         self._is_updating = True
@@ -129,8 +133,8 @@ class EulerView(QWidget):
 
 
 class AxisAngleView(_RotationComponent):
-    def _add_gui(self):
-        self._sliders: List[QLabeledDoubleSlider] = []
+    def _add_gui(self) -> None:
+        self._sliders: list[QLabeledDoubleSlider] = []
         for i in "xyzθ":
             wdg = QLabeledDoubleSlider(Qt.Orientation.Horizontal)
             if i in "xyz":
@@ -149,15 +153,15 @@ class AxisAngleView(_RotationComponent):
             with utils.signals_blocked(sld):
                 sld.setValue(np.rad2deg(v) if i == 3 else v)
 
-    def _on_change(self):
+    def _on_change(self) -> None:
         xyzt = [s.value() for s in self._sliders]
         xyzt[-1] = np.deg2rad(xyzt[-1])
         self._model.axis_angle = xyzt
 
 
 class OriginView(_RotationComponent):
-    def _add_gui(self):
-        self._sliders: List[Optional[QLabeledSlider]] = [None, None, None]
+    def _add_gui(self) -> None:
+        self._sliders: list[QLabeledSlider | None] = [None, None, None]
         for i, l in enumerate("ZYX"):
             wdg = QLabeledSlider(Qt.Orientation.Horizontal)
             wdg.setRange(-1000, 1000)  # TODO
@@ -165,7 +169,7 @@ class OriginView(_RotationComponent):
             self.layout().addRow(f"{l}", wdg)
             self._sliders[i] = wdg
 
-    def _on_change(self):
+    def _on_change(self) -> None:
         self._model.origin = [s.value() for s in self._sliders]
 
     def _update(self) -> None:
@@ -175,14 +179,18 @@ class OriginView(_RotationComponent):
 
 
 class _Collapsible(QCollapsible):
-    def __init__(self, title: str, widget, parent: Optional[QWidget] = None):
+    def __init__(
+        self, title: str, widget, parent: QWidget | None = None
+    ) -> None:
         super().__init__(title, parent)
         self.addWidget(widget)
         self.layout().setContentsMargins(0, 0, 0, 0)
 
 
 class RotationView(QWidget):
-    def __init__(self, model: Optional[RotationModel] = None, parent=None):
+    def __init__(
+        self, model: RotationModel | None = None, parent=None
+    ) -> None:
         super().__init__(parent)
         self._model: RotationModel = model or RotationModel()
 
@@ -210,5 +218,5 @@ class RotationView(QWidget):
         self._reset_rot.clicked.connect(self._reset_rotation)
         self.layout().addWidget(self._reset_rot)
 
-    def _reset_rotation(self):
+    def _reset_rotation(self) -> None:
         self._model.quaternion = (1, 0, 0, 0)

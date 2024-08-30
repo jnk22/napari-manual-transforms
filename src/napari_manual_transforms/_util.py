@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 from vispy.util.quaternion import Quaternion
 
@@ -7,7 +5,7 @@ from vispy.util.quaternion import Quaternion
 class _Quaternion(Quaternion):
     @classmethod
     def from_arcball(cls, xy, wh):
-        """Convert x,y coordinates to w,x,y,z Quaternion parameters"""
+        """Convert x,y coordinates to w,x,y,z Quaternion parameters."""
         x, y = xy
         w, h = wh
         r = (w + h) / 2.0
@@ -25,13 +23,12 @@ class _Quaternion(Quaternion):
 
 
 def _get_tform_bounds(input: np.ndarray, matrix: np.ndarray, full=True):
-    if not full:
-        return input.shape
+    return None if full else input.shape
 
 
 def transform_array_3d(
     ary: np.ndarray, matrix, offset, reshape=True
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     import scipy.ndimage as ndi
 
     if reshape:
