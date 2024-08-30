@@ -1,26 +1,106 @@
+[project]
+name = "napari-manual-transforms"
+dynamic = ["version"]
+description = "Interface to manually edit layer affine transforms"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Talley Lambert" },
+  { email = "talley.lambert@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Framework :: napari",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Image Processing",
+  "Topic :: Software Development :: Testing",
+]
+requires-python = ">=3.9"
+dependencies = [
+  "numpy",
+  "magicgui",
+  "qtpy",
+  "scikit-image",
+]
+
+[project.optional-dependencies]
+testing = [
+  "tox",
+  "pytest", # https://docs.pytest.org/en/latest/contents.html
+  "pytest-cov", # https://pytest-cov.readthedocs.io/en/latest/
+  "pytest-qt", # https://pytest-qt.readthedocs.io/en/latest/
+  "napari",
+  "pyqt5",
+]
+
+[project.entry-points."napari.manifest"]
+napari-manual-transforms = "napari_manual_transforms:napari.yaml"
+
+[project.urls]
+"Bug Tracker" = "https://github.com/tlambert03/napari-manual-transforms/issues"
+"Documentation" = "https://github.com/tlambert03/napari-manual-transforms#README.md"
+"Source Code" = "https://github.com/tlambert03/napari-manual-transforms"
+"User Support" = "https://github.com/tlambert03/napari-manual-transforms/issues"
+
 [build-system]
-requires = ["setuptools", "wheel", "setuptools_scm[toml]"]
+requires = ["setuptools>=42.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools_scm]
+[tool.setuptools]
+include-package-data = true
 
-[tool.mypy]
-ignore_missing_imports = true
+[tool.setuptools.packages.find]
+where = ["src"]
 
-[tool.pyright]
-include = ["src"]
-exclude = ["**/__pycache__"]
-reportMissingImports = true
-reportMissingTypeStubs = false
-pythonVersion = "3.12"
-pythonPlatform = "Linux"
+[tool.setuptools.package-data]
+"*" = ["*.yaml"]
+
+[tool.setuptools.dynamic]
+version = { attr = "napari_manual_transforms.__init__.__version__" }
 
 [tool.ruff]
-line-length = 88
-target-version = "py312"
+line-length = 79
+target-version = "py39"
+fix = true
 
-[tool.ruff.format]
-docstring-code-format = true
+exclude = [
+  ".bzr",
+  ".direnv",
+  ".eggs",
+  ".git",
+  ".mypy_cache",
+  ".pants.d",
+  ".ruff_cache",
+  ".svn",
+  ".tox",
+  ".venv",
+  "__pypackages__",
+  "_build",
+  "buck-out",
+  "build",
+  "dist",
+  "node_modules",
+  "venv",
+  "*vendored*",
+  "*_vendor*",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["D203", "D213", "COM812", "ISC001"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104"]
+"tests/*.py" = ["S101"]
 
 [tool.vulture]
 paths = ["src"]
