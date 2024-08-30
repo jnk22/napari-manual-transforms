@@ -126,7 +126,7 @@ class RotationWidget(LayerFollower, RotationView):
             self._active.affine = self._model.transform
 
     def _on_mouse_drag(self, viewer, event):
-        """update layer affine when alt-dragging."""
+        """Update layer affine when alt-dragging."""
         if self._active is None or ALT not in event.modifiers:
             return
 

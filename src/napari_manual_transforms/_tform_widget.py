@@ -1,4 +1,5 @@
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
+from typing import List, Optional
 
 import numpy as np
 from qtpy.QtCore import Qt
@@ -35,10 +36,10 @@ class _RotationComponent(QWidget):
         return self._model
 
     def _update(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _add_gui(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class QuaternionView(_RotationComponent):

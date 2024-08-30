@@ -1,4 +1,5 @@
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 import numpy as np
 from psygnal import Signal
@@ -101,7 +102,7 @@ class RotationModel:
 
     @property
     def rotation_axis(self):
-        """tip of rotation axis, with tail at (0,0,0)."""
+        """Tip of rotation axis, with tail at (0,0,0)."""
         return self._rotation_axis
 
     @property
@@ -183,14 +184,14 @@ class RotationModel:
         return T @ M @ np.linalg.inv(T)
 
     def _set_qwxyz(self, v: float, idx: int):
-        """set single value of quaternion."""
+        """Set single value of quaternion."""
         if idx == 0:
             assert -1 <= v <= 1
             sint = np.sin((np.arccos(v) * 2) / 2)
             self.quaternion = (v,) + tuple(
                 np.asarray(self.rotation_axis) * sint
             )
-            return
+            return None
 
         idx -= 1
         w = self._q[0]
