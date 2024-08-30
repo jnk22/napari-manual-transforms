@@ -4,9 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 
-[tool.black]
-line-length = 79
+[tool.mypy]
+ignore_missing_imports = true
 
-[tool.isort]
-profile = "black"
-line_length = 79
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.vulture]
+paths = ["src"]
+min_confidence = 100
+make_whitelist = true
+sort_by_size = true
+
+[tool.coverage.report]
+exclude_lines = ["if (typing\\.)?TYPE_CHECKING:"]
