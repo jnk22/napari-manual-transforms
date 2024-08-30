@@ -1,10 +1,4 @@
-from importlib import metadata
-
-try:
-    __version__ = metadata.version("napari-manual-transforms")
-except metadata.PackageNotFoundError:
-    # package is not installed
-    __version__ = "uninstalled"
+__version__ = "0.0.1"
 
 from ._widget import RotationWidget
 
