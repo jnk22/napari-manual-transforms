@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Optional
+import functools
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
+from imreg3d.fusion import MergeFusion
+from imreg3d.registration import BaseRegistration, Keller3DRegistration
+from imreg3d.transform import transform_nd
+from loguru import logger
 from napari.layers import Image
 from qtpy.QtWidgets import QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
@@ -16,13 +22,123 @@ if TYPE_CHECKING:
     import napari.layers
     import napari.viewer
     from napari.utils.events import Event
+    from numpy.typing import NDArray
+
+
+@dataclass(frozen=True)
+class HashableArray:
+    """Wrapper to allow for hashing of NumPy arrays."""
+
+    shape: tuple
+    dtype: np.dtype
+    data: bytes
+
+    @classmethod
+    def from_ndarray(cls, arr: NDArray) -> Self:
+        """Creates a HashableArray from a NumPy array."""
+        return cls(shape=arr.shape, dtype=arr.dtype, data=arr.tobytes())
+
+    def to_ndarray(self) -> NDArray:
+        """Converts the HashableArray back to a NumPy array."""
+        return np.frombuffer(self.data, dtype=self.dtype).reshape(self.shape)
+
+
+# TODO: Only hash based on transformation matrix for better performance.
+@functools.cache
+def update_images_cached(
+    registration: BaseRegistration, tform: HashableArray, data: HashableArray
+) -> list[Image]:
+    fixed = data.to_ndarray()
+    moving = transform_nd(fixed, matrix=tform.to_ndarray(), dim=3, inverse=True)
+    result = registration.register(fixed, moving)
+
+    recovered = transform_nd(
+        moving,
+        dim=3,
+        translation=result.translation,
+        rotation=result.rotation,
+        inverse=True,
+    )
+    fused = MergeFusion().fuse(fixed, recovered)
+
+    if registration.debug:
+        debug_images_2d = [
+            Image(im.data, name=im.name)
+            for im in registration.debug_images["registration"]
+        ]
+        scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
+        debug_images_3d = [
+            Image(im.data, name=im.name, scale=scale)
+            for im in registration.debug_images_3d["registration"]
+        ]
+    else:
+        debug_images_2d = []
+        debug_images_3d = []
+        scale = (1,) * 3
+
+    return [
+        Image(fixed, name="fixed", scale=scale),
+        Image(moving, name="moving", scale=scale),
+        Image(recovered, name="recovered", scale=scale),
+        Image(fused, name="fused", scale=scale),
+        *debug_images_3d,
+        *debug_images_2d,
+    ]
+
+
+def update_images_cached_register(
+    registration: BaseRegistration,
+    tform: HashableArray,
+    fixed: HashableArray,
+    moving: HashableArray,
+) -> list[Image]:
+    fixed_ = fixed.to_ndarray()
+    moving_ = moving.to_ndarray()
+    moving_transformed = transform_nd(
+        moving_, matrix=tform.to_ndarray(), dim=3, inverse=True
+    )
+    result = registration.register(fixed_, moving_transformed)
+    logger.info(result)
+
+    recovered = transform_nd(
+        moving_transformed,
+        dim=3,
+        translation=result.translation,
+        rotation=result.rotation,
+        inverse=True,
+    )
+    fused = MergeFusion().fuse(fixed_, recovered)
+
+    if registration.debug:
+        debug_images_2d = [
+            Image(im.data, name=im.name)
+            for im in registration.debug_images["registration"]
+        ]
+        scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
+        debug_images_3d = [
+            Image(im.data, name=im.name, scale=scale)
+            for im in registration.debug_images_3d["registration"]
+        ]
+    else:
+        debug_images_2d = []
+        debug_images_3d = []
+        scale = (1,) * 3
+
+    return [
+        Image(fixed_, name="fixed", scale=scale),
+        Image(moving_transformed, name="moving", scale=scale),
+        Image(recovered, name="recovered", scale=scale),
+        Image(fused, name="fused", scale=scale),
+        *debug_images_3d,
+        *debug_images_2d,
+    ]
 
 
 class LayerFollower(QWidget):
     def __init__(self, viewer: napari.viewer.Viewer, parent=None) -> None:
         assert viewer
-        self._viewer: Optional[napari.Viewer] = None
-        self._active: Optional[napari.layers.Layer] = None
+        self._viewer: napari.Viewer | None = None
+        self._active: napari.layers.Layer | None = None
         super().__init__(parent)
         self._connect_viewer(viewer)
 
@@ -73,11 +189,18 @@ class LayerFollower(QWidget):
 
 
 class TransformationWidget(LayerFollower, TransformationView):
-    def __init__(self, viewer: napari.viewer.Viewer = None, parent=None):
+    def __init__(
+        self,
+        mode: Literal["transform", "register"] | None = None,
+        viewer: napari.viewer.Viewer | None = None,
+        parent=None,
+        registration: BaseRegistration | None = None,
+    ):
+        self.mode: Literal["transform", "register"] | None = mode
+        self.registration = registration or Keller3DRegistration()
+
         self._help = QLabel("(hold alt while dragging canvas to edit)")
-        self._help.setStyleSheet(
-            "font-size: 9pt; color: #AAA; text-align: center;"
-        )
+        self._help.setStyleSheet("font-size: 9pt; color: #AAA; text-align: center;")
         super().__init__(viewer, parent)
 
         self.layout().insertWidget(0, self._help)
@@ -124,10 +247,60 @@ class TransformationWidget(LayerFollower, TransformationView):
             return
         self.setEnabled(True)
         with self._model.valueChanged.blocked():
-            self._active.affine = self._model.transform
+            match self.mode:
+                case "transform":
+                    self.__imreg3d_code_tform()
+                case "register":
+                    self.__imreg3d_code_register()
+
+    def __imreg3d_code_register(self):
+        selected = self._active
+        tform = self._model.transform
+        self._active.affine = tform
+
+        moving = self._viewer.layers[0].data
+        fixed = self._viewer.layers[1].data
+
+        updated_layers = update_images_cached_register(
+            self.registration,
+            HashableArray.from_ndarray(tform),
+            HashableArray.from_ndarray(fixed),
+            HashableArray.from_ndarray(moving),
+        )
+
+        if len(self._viewer.layers) == 1:
+            self._viewer.layers.extend(updated_layers)
+        else:
+            self._viewer.layers[2:] = updated_layers
+
+        fixed_im = self._viewer.layers[2]
+        z_mid = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
+        self._viewer.dims.set_point(0, z_mid)
+        self._viewer.layers.selection.active = selected
+
+    def __imreg3d_code_tform(self):
+        selected = self._active
+        tform = self._model.transform
+        self._active.affine = tform
+
+        updated_layers = update_images_cached(
+            self.registration,
+            HashableArray.from_ndarray(tform),
+            HashableArray.from_ndarray(selected.data),
+        )
+
+        if len(self._viewer.layers) == 1:
+            self._viewer.layers.extend(updated_layers)
+        else:
+            self._viewer.layers[1:] = updated_layers
+
+        fixed_im = self._viewer.layers[1]
+        z_mid = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
+        self._viewer.dims.set_point(0, z_mid)
+        self._viewer.layers.selection.active = selected
 
     def _on_mouse_drag(self, viewer, event):
-        """update layer affine when alt-dragging."""
+        """Update layer affine when alt-dragging."""
         if self._active is None or ALT not in event.modifiers:
             return
 
@@ -158,7 +331,7 @@ class TransformationWidget(LayerFollower, TransformationView):
             self._update_from_layer()
 
     def _update_from_layer(self):
-        if self._active is not None:
+        if self._active is not None and self._active == self._viewer.layers[0]:
             with self._model.valueChanged.blocked():
                 # Affine matrix decomposition based on
                 # https://math.stackexchange.com/a/1463487
