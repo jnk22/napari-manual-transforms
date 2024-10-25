@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
@@ -28,9 +29,6 @@ if TYPE_CHECKING:
     from imreg3d.registration.result import RegistrationResult
     from napari.utils.events import Event
     from numpy.typing import NDArray
-
-# TODO: Save metadata (image size, registration method, command, ...).
-# TODO: Make first image invisible.
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,12 +92,12 @@ def update_images_cached(
 
     if registration.debug:
         debug_images_2d = [
-            Image(np.expand_dims(im.data, axis=0), name=im.name, rgb=True)
+            Image(np.expand_dims(im.data, axis=0), name=im.name)
             for im in registration.debug_images["registration"]
         ]
         scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
         debug_images_3d = [
-            Image(im.data, name=im.name, scale=scale, colormap="green")
+            Image(im.data, name=im.name, scale=scale)
             for im in registration.debug_images_3d["registration"]
         ]
     else:
@@ -183,8 +181,10 @@ class TransformationWidget(LayerFollower, TransformationView):
         output_dir: Path | str = "output",
         *,
         auto_registration: bool = True,
+        spacing: tuple[float, float, float] | None = None,
     ):
         self._mode: Literal["transform", "register"] | None = mode
+        self._spacing: tuple[float, float, float] | None = spacing
         self._registration: BaseRegistration = registration or Keller3DRegistration()
         self._tform_matrix: NDArray | None = None
         self._output_dir: Path = Path(output_dir)
@@ -274,6 +274,9 @@ class TransformationWidget(LayerFollower, TransformationView):
                 else:
                     self._viewer.layers[idx:] = updated_layers
 
+                for layer in self._viewer.layers[:idx]:
+                    layer.visible = False
+
                 # We set the current's view to the middle of the Z axis
                 # as convenience.
                 fixed_im = self._viewer.layers[idx]
@@ -362,21 +365,43 @@ class TransformationWidget(LayerFollower, TransformationView):
             self._viewer.add_layer(new_layer)
 
     def _export_results(self):
-        metadata = "xxx"
-        timestamp = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
-        out_dir = self._output_dir / f"{metadata}_{timestamp}"
-
         if self._tform_matrix is not None and self._viewer:
-            self._output_dir.mkdir(parents=True, exist_ok=True)
+            now = datetime.datetime.now(tz=datetime.UTC)
 
-            file_path_npz = out_dir / Path("tform_matrix.npz")
-            np.savez_compressed(file_path_npz, self._tform_matrix)
+            out_dir = self._output_dir / now.strftime("%Y%m%d-%H%M%S")
+            out_dir.mkdir(parents=True, exist_ok=True)
 
-            file_path_txt = out_dir / Path("tform_matrix.txt")
-            file_path_txt.write_text(str(self._tform_matrix))
+            tform_array_path = out_dir / Path("tform_matrix.npz")
+            np.savez_compressed(tform_array_path, self._tform_matrix)
 
-            self._viewer.screenshot(str(out_dir / "full.png"), canvas_only=True)
-            self._viewer.screenshot(str(out_dir / "canvas.png"), canvas_only=False)
+            tform_text_path = out_dir / Path("tform_matrix.txt")
+            tform_text_path.write_text(str(self._tform_matrix))
+
+            screenshot_full_path = out_dir / "screenshot-full.png"
+            screenshot_canvas_path = out_dir / "screenshot-canvas.png"
+            self._viewer.screenshot(str(screenshot_full_path), canvas_only=False)
+            self._viewer.screenshot(str(screenshot_canvas_path), canvas_only=True)
+
+            match self._mode:
+                case "transform":
+                    fixed, moving = (im.name for im in self._viewer.layers[:2])
+                case "register":
+                    fixed, moving = (self._viewer.layers[0].name,) * 2
+                case _:
+                    fixed, moving = ("unknown",) * 2
+
+            size = len(self._viewer.layers[0].data)
+            spacing = ":".join(str(v) for v in self._spacing) if self._spacing else "/"
+            time = now.strftime("%Y-%m-%d %H:%M:%S")
+            method = self._registration.__class__.__name__
+            command = " ".join(sys.argv)
+
+            values = [fixed, moving, size, spacing, time, method, command]
+            text = ["Fixed", "Moving", "Size", "Spacing", "Time", "Method", "Command"]
+            meta = "\n".join(f"{x}: {y}" for x, y in zip(text, values, strict=True))
+
+            metadata_txt_path = out_dir / Path("metadata.txt")
+            metadata_txt_path.write_text(meta)
 
 
 if __name__ == "__main__":

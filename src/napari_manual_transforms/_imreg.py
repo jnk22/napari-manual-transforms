@@ -145,6 +145,7 @@ def register(
         list(reversed(images)),
         method,
         "register",
+        spacing,
         upsample_factor,
         rotation_axis,
         debug=debug,
@@ -172,7 +173,13 @@ def transform(
     images = [Image3D.from_path(image_path)]
     __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
     __start_napari(
-        images, method, "transform", upsample_factor, rotation_axis, debug=debug
+        images,
+        method,
+        "transform",
+        spacing,
+        upsample_factor,
+        rotation_axis,
+        debug=debug,
     )
 
 
@@ -221,6 +228,7 @@ def __start_napari(
     images: Sequence[Image3D | Image2D],
     method: RegistrationMethod3D,
     mode: Literal["transform", "register"],
+    spacing: tuple[float, float, float] | None,
     upsample_factor: UpsampleFactorInput = 1,
     rotation_axis: RotationAxisRecovery = "z",
     *,
@@ -239,7 +247,9 @@ def __start_napari(
 
     v.dims.ndisplay = 3
     v.window.add_dock_widget(
-        TransformationWidget(viewer=v, registration=registration, mode=mode)
+        TransformationWidget(
+            viewer=v, registration=registration, mode=mode, spacing=spacing
+        )
     )
     napari.run()
 
