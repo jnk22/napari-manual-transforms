@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import contextlib
-import functools
+import datetime
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
+from cachetools import cached
+from cachetools.keys import hashkey
 from imreg3d.fusion import MergeFusion
 from imreg3d.registration import BaseRegistration, Keller3DRegistration
 from imreg3d.transform import transform_nd
 from loguru import logger
 from napari.layers import Image
-from qtpy.QtWidgets import QLabel, QPushButton, QWidget
+from pytransform3d import rotations as rot
+from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
 
 from napari_manual_transforms._model import MINIMUM_SCALE
@@ -21,11 +25,15 @@ from napari_manual_transforms._util import _Quaternion, transform_array_3d
 if TYPE_CHECKING:
     import napari.layers
     import napari.viewer
+    from imreg3d.registration.result import RegistrationResult
     from napari.utils.events import Event
     from numpy.typing import NDArray
 
+# TODO: Save metadata (image size, registration method, command, ...).
+# TODO: Make first image invisible.
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class HashableArray:
     """Wrapper to allow for hashing of NumPy arrays."""
 
@@ -35,88 +43,63 @@ class HashableArray:
 
     @classmethod
     def from_ndarray(cls, arr: NDArray) -> Self:
-        """Creates a HashableArray from a NumPy array."""
+        """Create a HashableArray from a NumPy array."""
         return cls(shape=arr.shape, dtype=arr.dtype, data=arr.tobytes())
 
     def to_ndarray(self) -> NDArray:
-        """Converts the HashableArray back to a NumPy array."""
+        """Convert the HashableArray back to a NumPy array."""
         return np.frombuffer(self.data, dtype=self.dtype).reshape(self.shape)
 
 
-# TODO: Only hash based on transformation matrix for better performance.
-@functools.cache
+def create_matrix(result: RegistrationResult, origin: NDArray) -> NDArray:
+    rotation_angles = np.deg2rad(result.rotation or (0, 0, 0))
+    rotation_matrix = rot.active_matrix_from_intrinsic_euler_xyz(rotation_angles)
+    scale_matrix = np.diag(np.array((result.scale or 1,) * 3))
+
+    M = np.eye(4)
+    M[:3, :3] = rotation_matrix @ scale_matrix
+    M[:3, 3] = result.translation or (0, 0, 0)
+    T = np.eye(4)
+    T[:3, -1] = origin
+
+    return T @ M @ np.linalg.inv(T)
+
+
+@cached(
+    cache={},
+    key=lambda _registration, tform, _origin, _fixed, _moving: hashkey(tform),
+)
 def update_images_cached(
-    registration: BaseRegistration, tform: HashableArray, data: HashableArray
-) -> list[Image]:
-    fixed = data.to_ndarray()
-    moving = transform_nd(fixed, matrix=tform.to_ndarray(), dim=3, inverse=True)
-    result = registration.register(fixed, moving)
-
-    recovered = transform_nd(
-        moving,
-        dim=3,
-        translation=result.translation,
-        rotation=result.rotation,
-        inverse=True,
-    )
-    fused = MergeFusion().fuse(fixed, recovered)
-
-    if registration.debug:
-        debug_images_2d = [
-            Image(im.data, name=im.name)
-            for im in registration.debug_images["registration"]
-        ]
-        scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
-        debug_images_3d = [
-            Image(im.data, name=im.name, scale=scale)
-            for im in registration.debug_images_3d["registration"]
-        ]
-    else:
-        debug_images_2d = []
-        debug_images_3d = []
-        scale = (1,) * 3
-
-    return [
-        Image(fixed, name="fixed", scale=scale),
-        Image(moving, name="moving", scale=scale),
-        Image(recovered, name="recovered", scale=scale),
-        Image(fused, name="fused", scale=scale),
-        *debug_images_3d,
-        *debug_images_2d,
-    ]
-
-
-def update_images_cached_register(
     registration: BaseRegistration,
     tform: HashableArray,
-    fixed: HashableArray,
-    moving: HashableArray,
-) -> list[Image]:
-    fixed_ = fixed.to_ndarray()
-    moving_ = moving.to_ndarray()
-    moving_transformed = transform_nd(
-        moving_, matrix=tform.to_ndarray(), dim=3, inverse=True
-    )
-    result = registration.register(fixed_, moving_transformed)
-    logger.info(result)
+    origin: NDArray,
+    fixed: NDArray,
+    moving: NDArray,
+) -> tuple[NDArray, list[Image]]:
+    tform_arr = tform.to_ndarray()
+    logger.info(f"Transformation matrix: {tform_arr}")
 
-    recovered = transform_nd(
-        moving_transformed,
-        dim=3,
-        translation=result.translation,
-        rotation=result.rotation,
-        inverse=True,
-    )
-    fused = MergeFusion().fuse(fixed_, recovered)
+    moving_trans = transform_nd(moving, matrix=tform_arr, dim=3, inverse=True)
+    result = registration.register(fixed, moving_trans)
+    logger.info(f"Registration result: {result}")
+
+    recovery_matrix = create_matrix(result, origin)
+    logger.info(f"Recovery matrix: {recovery_matrix}")
+
+    recovered = transform_nd(moving_trans, matrix=recovery_matrix, dim=3, inverse=True)
+    fused = MergeFusion().fuse(fixed, recovered)
+
+    full_matrix = recovery_matrix @ tform_arr
+    logger.info(f"Final matrix: {full_matrix}")
 
     if registration.debug:
         debug_images_2d = [
-            Image(im.data, name=im.name)
+            Image(np.expand_dims(im.data, axis=0), name=im.name, rgb=True)
             for im in registration.debug_images["registration"]
         ]
         scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
         debug_images_3d = [
-            Image(im.data, name=im.name, scale=scale)
+            Image(im.data, name=im.name, scale=scale, colormap="green")
             for im in registration.debug_images_3d["registration"]
         ]
     else:
@@ -124,14 +107,16 @@ def update_images_cached_register(
         debug_images_3d = []
         scale = (1,) * 3
 
-    return [
-        Image(fixed_, name="fixed", scale=scale),
-        Image(moving_transformed, name="moving", scale=scale),
+    images = [
+        Image(fixed, name="fixed", scale=scale),
+        Image(moving_trans, name="moving", scale=scale),
         Image(recovered, name="recovered", scale=scale),
         Image(fused, name="fused", scale=scale),
         *debug_images_3d,
         *debug_images_2d,
     ]
+
+    return full_matrix, images
 
 
 class LayerFollower(QWidget):
@@ -195,9 +180,14 @@ class TransformationWidget(LayerFollower, TransformationView):
         viewer: napari.viewer.Viewer | None = None,
         parent=None,
         registration: BaseRegistration | None = None,
+        output_dir: Path | str = "output",
+        *,
+        auto_registration: bool = True,
     ):
-        self.mode: Literal["transform", "register"] | None = mode
-        self.registration = registration or Keller3DRegistration()
+        self._mode: Literal["transform", "register"] | None = mode
+        self._registration: BaseRegistration = registration or Keller3DRegistration()
+        self._tform_matrix: NDArray | None = None
+        self._output_dir: Path = Path(output_dir)
 
         self._help = QLabel("(hold alt while dragging canvas to edit)")
         self._help.setStyleSheet("font-size: 9pt; color: #AAA; text-align: center;")
@@ -212,6 +202,14 @@ class TransformationWidget(LayerFollower, TransformationView):
         self._resample_btn = QPushButton("resample")
         self._resample_btn.clicked.connect(self._resample)
         self.layout().addWidget(self._resample_btn)
+
+        self._export_result_btn = QPushButton("export results")
+        self._export_result_btn.clicked.connect(self._export_results)
+        self.layout().addWidget(self._export_result_btn)
+
+        self._auto_registration_checkbox = QCheckBox("Auto-registration")
+        self._auto_registration_checkbox.setChecked(auto_registration)
+        self.layout().addWidget(self._auto_registration_checkbox)
 
         # try:
         #     self._layer = viewer.layers["rotation axis"]
@@ -245,59 +243,44 @@ class TransformationWidget(LayerFollower, TransformationView):
         if not isinstance(self._active, Image) or self._active.data.ndim < 3:
             self.setEnabled(False)
             return
+
         self.setEnabled(True)
         with self._model.valueChanged.blocked():
-            match self.mode:
-                case "transform":
-                    self.__imreg3d_code_tform()
-                case "register":
-                    self.__imreg3d_code_register()
+            self._active.affine = self._model.transform
+            if self._auto_registration_checkbox.isChecked() and self._viewer:
+                match self._mode:
+                    case "transform":
+                        fixed = np.asarray(self._active.data)
+                        moving = np.asarray(self._active.data)
+                    case "register":
+                        fixed = self._viewer.layers[1].data
+                        moving = self._viewer.layers[0].data
+                    case _:
+                        return
 
-    def __imreg3d_code_register(self):
-        selected = self._active
-        tform = self._model.transform
-        self._active.affine = tform
+                tform_matrix, updated_layers = update_images_cached(
+                    self._registration,
+                    HashableArray.from_ndarray(self._model.transform),
+                    self._model.origin,
+                    fixed,
+                    moving,
+                )
 
-        moving = self._viewer.layers[0].data
-        fixed = self._viewer.layers[1].data
+                self._tform_matrix = tform_matrix
+                idx = 1 if self._mode == "transform" else 2
 
-        updated_layers = update_images_cached_register(
-            self.registration,
-            HashableArray.from_ndarray(tform),
-            HashableArray.from_ndarray(fixed),
-            HashableArray.from_ndarray(moving),
-        )
+                if len(self._viewer.layers) == idx:
+                    self._viewer.layers.extend(updated_layers)
+                else:
+                    self._viewer.layers[idx:] = updated_layers
 
-        if len(self._viewer.layers) == 1:
-            self._viewer.layers.extend(updated_layers)
-        else:
-            self._viewer.layers[2:] = updated_layers
+                # We set the current's view to the middle of the Z axis
+                # as convenience.
+                fixed_im = self._viewer.layers[idx]
+                z_mid_layer_index = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
+                self._viewer.dims.set_point(0, z_mid_layer_index)
 
-        fixed_im = self._viewer.layers[2]
-        z_mid = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
-        self._viewer.dims.set_point(0, z_mid)
-        self._viewer.layers.selection.active = selected
-
-    def __imreg3d_code_tform(self):
-        selected = self._active
-        tform = self._model.transform
-        self._active.affine = tform
-
-        updated_layers = update_images_cached(
-            self.registration,
-            HashableArray.from_ndarray(tform),
-            HashableArray.from_ndarray(selected.data),
-        )
-
-        if len(self._viewer.layers) == 1:
-            self._viewer.layers.extend(updated_layers)
-        else:
-            self._viewer.layers[1:] = updated_layers
-
-        fixed_im = self._viewer.layers[1]
-        z_mid = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
-        self._viewer.dims.set_point(0, z_mid)
-        self._viewer.layers.selection.active = selected
+                self._viewer.layers.selection.active = self._viewer.layers[0]
 
     def _on_mouse_drag(self, viewer, event):
         """Update layer affine when alt-dragging."""
@@ -331,28 +314,30 @@ class TransformationWidget(LayerFollower, TransformationView):
             self._update_from_layer()
 
     def _update_from_layer(self):
-        if self._active is not None and self._active == self._viewer.layers[0]:
-            with self._model.valueChanged.blocked():
-                # Affine matrix decomposition based on
-                # https://math.stackexchange.com/a/1463487
-                affine_matrix = self._active.affine.affine_matrix
+        if self._active is None:
+            return
 
-                # Extract scaling only from first row of the rotation
-                # matrix as only single scaling factor is allowed as input.
-                scale = np.linalg.norm(affine_matrix[0, :3]).item()
-                self._model.scale = scale
+        with self._model.valueChanged.blocked():
+            # Affine matrix decomposition based on
+            # https://math.stackexchange.com/a/1463487
+            affine_matrix = self._active.affine.affine_matrix
 
-                # Adjust translation based on origin offset.
-                origin = self._model.origin
-                T = np.eye(4)
-                T[:3, -1] = origin
-                self._model.translation = (affine_matrix @ T)[:3, 3] - origin
+            # Extract scaling only from first row of the rotation
+            # matrix as only single scaling factor is allowed as input.
+            scale = np.linalg.norm(affine_matrix[0, :3]).item()
+            self._model.scale = scale
 
-                # Prevent division by zero by using at least the minimum
-                # scaling value that is allowed as scaling input.
-                self._model.matrix = affine_matrix[:3, :3] / max(scale, MINIMUM_SCALE)
+            # Adjust translation based on origin offset.
+            origin = self._model.origin
+            T = np.eye(4)
+            T[:3, -1] = origin
+            self._model.translation = (affine_matrix @ T)[:3, 3] - origin
 
-            self._model.valueChanged.emit()
+            # Prevent division by zero by using at least the minimum
+            # scaling value that is allowed as scaling input.
+            self._model.matrix = affine_matrix[:3, :3] / max(scale, MINIMUM_SCALE)
+
+        self._model.valueChanged.emit()
 
     def _connect_layer(self, layer: napari.layers.Layer):
         super()._connect_layer(layer)
@@ -375,6 +360,23 @@ class TransformationWidget(LayerFollower, TransformationView):
                 name=f"resampled {self._active.name}",
             )
             self._viewer.add_layer(new_layer)
+
+    def _export_results(self):
+        metadata = "xxx"
+        timestamp = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
+        out_dir = self._output_dir / f"{metadata}_{timestamp}"
+
+        if self._tform_matrix is not None and self._viewer:
+            self._output_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path_npz = out_dir / Path("tform_matrix.npz")
+            np.savez_compressed(file_path_npz, self._tform_matrix)
+
+            file_path_txt = out_dir / Path("tform_matrix.txt")
+            file_path_txt.write_text(str(self._tform_matrix))
+
+            self._viewer.screenshot(str(out_dir / "full.png"), canvas_only=True)
+            self._viewer.screenshot(str(out_dir / "canvas.png"), canvas_only=False)
 
 
 if __name__ == "__main__":

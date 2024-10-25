@@ -140,7 +140,50 @@ def register(
     'moving' image.
     """
     images = [Image3D.from_path(im_path) for im_path in image_paths]
+    __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    __start_napari(
+        list(reversed(images)),
+        method,
+        "register",
+        upsample_factor,
+        rotation_axis,
+        debug=debug,
+    )
 
+
+@cli.command()
+def transform(
+    image_path: Path,
+    method: RegistrationMethod3D = "keller",
+    resize: ResizeInput = 64,
+    spacing: tuple[float, float, float] | None = None,
+    upsample_factor: UpsampleFactorInput = 1,
+    rotation_axis: RotationAxisRecovery = "z",
+    *,
+    max_pad: MaxPadInput = False,
+    safe_pad: SafePadInput = False,
+    debug: bool = False,
+):
+    """Manually transform and auto-register the original image and a copy of it.
+
+    This mode can be used to test any 3D registration method by
+    transformed to be registered with the fixed image.
+    """
+    images = [Image3D.from_path(image_path)]
+    __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    __start_napari(
+        images, method, "transform", upsample_factor, rotation_axis, debug=debug
+    )
+
+
+def __prepare_images(
+    images: Sequence[Image3D | Image2D],
+    resize: ResizeInput = 64,
+    spacing: tuple[float, float, float] | None = None,
+    *,
+    max_pad: MaxPadInput = False,
+    safe_pad: SafePadInput = False,
+) -> list[Image2D | Image3D]:
     if spacing is not None:
         logger.debug(f"Spacing '{spacing}' will be applied both input images")
         corrected_shape = np.array(images[0].resolution) * spacing
@@ -171,40 +214,7 @@ def register(
         for im in images:
             im.pad_safe_rotation()
 
-    __start_napari(
-        list(reversed(images)),
-        method,
-        "register",
-        upsample_factor,
-        rotation_axis,
-        debug=debug,
-    )
-
-
-@cli.command()
-def transform(
-    image_path: Path,
-    method: RegistrationMethod3D = "keller",
-    resize: ResizeInput = 64,
-    upsample_factor: UpsampleFactorInput = 1,
-    rotation_axis: RotationAxisRecovery = "z",
-    *,
-    safe_pad: SafePadInput = False,
-    debug: bool = False,
-):
-    """Manually transform and auto-register the original image and a copy of it.
-
-    This mode can be used to test any 3D registration method by
-    transformed to be registered with the fixed image.
-    """
-    image = Image3D.from_path(image_path).resize_to_shape(resize)
-
-    if safe_pad:
-        image.pad_safe_rotation().resize_to_shape(resize)
-
-    __start_napari(
-        [image], method, "transform", upsample_factor, rotation_axis, debug=debug
-    )
+    return list(images)
 
 
 def __start_napari(
@@ -224,7 +234,6 @@ def __start_napari(
     )
 
     v = napari.Viewer()
-    # TODO: Make first image invisible.
     for im in images:
         v.add_layer(Image(im.data, name=im.name))
 
