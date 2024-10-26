@@ -384,9 +384,9 @@ class TransformationWidget(LayerFollower, TransformationView):
 
             match self._mode:
                 case "transform":
-                    fixed, moving = (im.name for im in self._viewer.layers[:2])
-                case "register":
                     fixed, moving = (self._viewer.layers[0].name,) * 2
+                case "register":
+                    fixed, moving = (im.name for im in self._viewer.layers[:2:-1])
                 case _:
                     fixed, moving = ("unknown",) * 2
 
