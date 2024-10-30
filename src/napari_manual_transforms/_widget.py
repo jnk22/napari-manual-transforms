@@ -371,8 +371,11 @@ class TransformationWidget(LayerFollower, TransformationView):
             out_dir = self._output_dir / now.strftime("%Y%m%d-%H%M%S")
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            tform_array_path = out_dir / Path("tform_matrix.npz")
-            np.savez_compressed(tform_array_path, self._tform_matrix)
+            tform_matrix_path = out_dir / Path("tform_matrix.npy")
+            np.save(tform_matrix_path, self._tform_matrix)
+
+            rotation_matrix_path = out_dir / Path("rotation_matrix.npy")
+            np.save(rotation_matrix_path, self._tform_matrix[:3, :3])
 
             tform_text_path = out_dir / Path("tform_matrix.txt")
             tform_text_path.write_text(str(self._tform_matrix))
@@ -386,7 +389,8 @@ class TransformationWidget(LayerFollower, TransformationView):
                 case "transform":
                     fixed, moving = (self._viewer.layers[0].name,) * 2
                 case "register":
-                    fixed, moving = (im.name for im in self._viewer.layers[:2:-1])
+                    input_images = self._viewer.layers[:2]
+                    fixed, moving = reversed([im.name for im in input_images])
                 case _:
                     fixed, moving = ("unknown",) * 2
 
