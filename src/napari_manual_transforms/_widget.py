@@ -26,7 +26,7 @@ from napari_manual_transforms._util import _Quaternion, transform_array_3d
 if TYPE_CHECKING:
     import napari.layers
     import napari.viewer
-    from imreg3d.registration.result import RegistrationResult
+    from imreg3d.transform import SimilarityTransformation
     from napari.utils.events import Event
     from numpy.typing import NDArray
 
@@ -49,10 +49,10 @@ class HashableArray:
         return np.frombuffer(self.data, dtype=self.dtype).reshape(self.shape)
 
 
-def create_matrix(result: RegistrationResult, origin: NDArray) -> NDArray:
-    rotation_angles = np.deg2rad(result.rotation or (0, 0, 0))
+def create_matrix(tform: SimilarityTransformation, origin: NDArray) -> NDArray:
+    rotation_angles = np.deg2rad(tform.rotation or (0, 0, 0))
     rotation_matrix = rot.active_matrix_from_intrinsic_euler_xyz(rotation_angles)
-    scale_matrix = np.diag(np.array((result.scale or 1,) * 3))
+    scale_matrix = np.diag(np.array((tform.scale or 1,) * 3))
 
     M = np.eye(4)
     M[:3, :3] = rotation_matrix @ scale_matrix
@@ -81,7 +81,11 @@ def update_images_cached(
     result = registration.register(fixed, moving_trans)
     logger.info(f"Registration result: {result}")
 
-    recovery_matrix = create_matrix(result, origin)
+    if result.transformation is None:
+        msg = "Registration failed"
+        raise ValueError(msg)
+
+    recovery_matrix = create_matrix(result.transformation, origin)
     logger.info(f"Recovery matrix: {recovery_matrix}")
 
     recovered = transform_nd(moving_trans, matrix=recovery_matrix, dim=3, inverse=True)
