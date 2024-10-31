@@ -56,7 +56,7 @@ def create_matrix(tform: SimilarityTransformation, origin: NDArray) -> NDArray:
 
     M = np.eye(4)
     M[:3, :3] = rotation_matrix @ scale_matrix
-    M[:3, 3] = result.translation or (0, 0, 0)
+    M[:3, 3] = -np.roll(tform.translation or (0, 0, 0), 1)
     T = np.eye(4)
     T[:3, -1] = origin
 
