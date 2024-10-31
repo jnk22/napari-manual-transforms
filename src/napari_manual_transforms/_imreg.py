@@ -114,8 +114,8 @@ def __prepare_images(
     max_pad: MaxPadInput = False,
     safe_pad: SafePadInput = False,
 ) -> None:
-    target_shape = np.array(images[0].resolution) * spacing
-    target_shape /= max(target_shape) / (resize or 1)
+    target_shape = np.array(images[0].resolution) * (spacing or 1.0)
+    target_shape /= max(target_shape) / (resize or 1.0)
     for im in images:
         im.resize_to_shape(tuple(target_shape.round().astype(int)))
 
