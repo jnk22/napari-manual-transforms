@@ -245,11 +245,9 @@ class TransformationWidget(LayerFollower, TransformationView):
             if self._auto_registration_checkbox.isChecked() and self._viewer:
                 match self._mode:
                     case "transform":
-                        fixed = np.asarray(self._active.data)
-                        moving = np.asarray(self._active.data)
+                        images = (np.asarray(self._active.data),) * 2
                     case "register":
-                        fixed = self._viewer.layers[1].data
-                        moving = self._viewer.layers[0].data
+                        images = (x.data for x in self._viewer.layers[1::-1])
                     case _:
                         return
 
@@ -257,8 +255,7 @@ class TransformationWidget(LayerFollower, TransformationView):
                     self._registration,
                     HashableArray.from_ndarray(self._model.transform),
                     self._model.origin,
-                    fixed,
-                    moving,
+                    *images,
                 )
 
                 self._tform_matrix = tform_matrix
@@ -382,12 +379,11 @@ class TransformationWidget(LayerFollower, TransformationView):
 
             match self._mode:
                 case "transform":
-                    fixed, moving = (self._viewer.layers[0].name,) * 2
+                    image_names = (self._viewer.layers[0].name,) * 2
                 case "register":
-                    input_images = self._viewer.layers[:2]
-                    fixed, moving = reversed([im.name for im in input_images])
+                    image_names = (im.name for im in self._viewer.layers[1::-1])
                 case _:
-                    fixed, moving = ("unknown",) * 2
+                    image_names = ("unknown",) * 2
 
             size = len(self._viewer.layers[0].data)
             spacing = ":".join(str(v) for v in self._spacing) if self._spacing else "/"
@@ -395,8 +391,8 @@ class TransformationWidget(LayerFollower, TransformationView):
             method = self._registration.__class__.__name__
             command = " ".join(sys.argv)
 
-            values = [fixed, moving, size, spacing, time, method, command]
-            text = ["Fixed", "Moving", "Size", "Spacing", "Time", "Method", "Command"]
+            values = (*image_names, size, spacing, time, method, command)
+            text = ("Fixed", "Moving", "Size", "Spacing", "Time", "Method", "Command")
             meta = "\n".join(f"{x}: {y}" for x, y in zip(text, values, strict=True))
 
             metadata_txt_path = out_dir / Path("metadata.txt")
