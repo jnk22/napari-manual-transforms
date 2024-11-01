@@ -127,6 +127,10 @@ def __prepare_images(
         for im in images:
             im.pad_safe_rotation()
 
+    if resize:
+        for im in images:
+            im.resize_to_shape(resize)
+
 
 def __start_napari(
     images: Sequence[Image],
