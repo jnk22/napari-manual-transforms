@@ -63,7 +63,8 @@ def update_images_cached(
 
     moving_trans = warp(moving, tform_matrix, dim=3, inverse=True)
     result = registration.register(fixed, moving_trans)
-    logger.info(f"Registration result: {result}")
+    logger.info(f"Registration result: {result.transformation}")
+    logger.info(f"Registration duration: {result.duration:.2f}s")
 
     if result.transformation is None:
         msg = "Registration failed"
