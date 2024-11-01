@@ -12,10 +12,9 @@ from cachetools import cached
 from cachetools.keys import hashkey
 from imreg3d.fusion import MergeFusion
 from imreg3d.registration import BaseRegistration, Keller3DRegistration
-from imreg3d.transform import transform_nd
+from imreg3d.transform import transformation_matrix, warp
 from loguru import logger
 from napari.layers import Image
-from pytransform3d import rotations as rot
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
 
@@ -26,7 +25,6 @@ from napari_manual_transforms._util import _Quaternion, transform_array_3d
 if TYPE_CHECKING:
     import napari.layers
     import napari.viewer
-    from imreg3d.transform import SimilarityTransformation
     from napari.utils.events import Event
     from numpy.typing import NDArray
 
@@ -49,35 +47,21 @@ class HashableArray:
         return np.frombuffer(self.data, dtype=self.dtype).reshape(self.shape)
 
 
-def create_matrix(tform: SimilarityTransformation, origin: NDArray) -> NDArray:
-    rotation_angles = np.deg2rad(tform.rotation or (0, 0, 0))
-    rotation_matrix = rot.active_matrix_from_intrinsic_euler_xyz(rotation_angles)
-    scale_matrix = np.diag(np.array((tform.scale or 1,) * 3))
-
-    M = np.eye(4)
-    M[:3, :3] = rotation_matrix @ scale_matrix
-    M[:3, 3] = -np.roll(tform.translation or (0, 0, 0), 1)
-    T = np.eye(4)
-    T[:3, -1] = origin
-
-    return T @ M @ np.linalg.inv(T)
-
-
 @cached(
     cache={},
     key=lambda _registration, tform, _origin, _fixed, _moving: hashkey(tform),
 )
 def update_images_cached(
     registration: BaseRegistration,
-    tform: HashableArray,
+    transformation: HashableArray,
     origin: NDArray,
     fixed: NDArray,
     moving: NDArray,
 ) -> tuple[NDArray, list[Image]]:
-    tform_arr = tform.to_ndarray()
-    logger.info(f"Transformation matrix: {tform_arr}")
+    tform_matrix = transformation.to_ndarray()
+    logger.info(f"Transformation matrix: {tform_matrix}")
 
-    moving_trans = transform_nd(moving, matrix=tform_arr, dim=3, inverse=True)
+    moving_trans = warp(moving, tform_matrix, dim=3, inverse=True)
     result = registration.register(fixed, moving_trans)
     logger.info(f"Registration result: {result}")
 
@@ -85,13 +69,19 @@ def update_images_cached(
         msg = "Registration failed"
         raise ValueError(msg)
 
-    recovery_matrix = create_matrix(result.transformation, origin)
+    recovery_matrix = transformation_matrix(
+        dim=3,
+        translation=result.transformation.translation,
+        rotation=result.transformation.rotation,
+        scale=result.transformation.scale,
+        origin=origin,
+    )
     logger.info(f"Recovery matrix: {recovery_matrix}")
 
-    recovered = transform_nd(moving_trans, matrix=recovery_matrix, dim=3, inverse=True)
+    recovered = warp(moving_trans, recovery_matrix, dim=3, inverse=True)
     fused = MergeFusion().fuse(fixed, recovered)
 
-    full_matrix = recovery_matrix @ tform_arr
+    full_matrix = recovery_matrix @ tform_matrix
     logger.info(f"Final matrix: {full_matrix}")
 
     if registration.debug:
