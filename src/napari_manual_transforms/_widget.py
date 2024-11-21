@@ -18,9 +18,9 @@ from napari.layers import Image
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
 
-from napari_manual_transforms._model import MINIMUM_SCALE
-from napari_manual_transforms._tform_widget import TransformationView
-from napari_manual_transforms._util import _Quaternion, transform_array_3d
+from ._model import MINIMUM_SCALE
+from ._tform_widget import TransformationView
+from ._util import _Quaternion, transform_array_3d
 
 if TYPE_CHECKING:
     import napari.layers
