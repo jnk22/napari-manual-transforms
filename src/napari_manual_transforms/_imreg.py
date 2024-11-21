@@ -5,7 +5,7 @@ from typing import Annotated, Final, Literal, Optional, TypeAlias
 import napari
 import numpy as np
 from click import Choice
-from imreg3d.image import Image, Image3D
+from imreg3d.image import Image, Image3D, Paths3DImageLoader
 from imreg3d.registration import (
     BaseRegistration,
     Keller3DRegistration,
@@ -44,7 +44,7 @@ def register(
     image_paths: tuple[Path, Path],
     method: RegistrationMethod3D = "keller",
     resize: ResizeInput = 64,
-    spacing: tuple[float, float, float] | None = None,
+    spacing: tuple[float, float, float] = (1, 1, 1),
     upsample_factor: UpsampleFactorInput = 1,
     rotation_axis: RotationAxisRecovery = "z",
     *,
@@ -62,10 +62,10 @@ def register(
     The first input is the 'fixed' image. The second image is the
     'moving' image.
     """
-    images = [Image3D.from_path(im_path) for im_path in image_paths]
+    images = list(Paths3DImageLoader(image_paths))
     __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
     __start_napari(
-        list(reversed(images)),
+        images[::-1],
         method,
         "register",
         spacing,
@@ -80,7 +80,7 @@ def transform(
     image_path: Path,
     method: RegistrationMethod3D = "keller",
     resize: ResizeInput = 64,
-    spacing: tuple[float, float, float] | None = None,
+    spacing: tuple[float, float, float] = (1, 1, 1),
     upsample_factor: UpsampleFactorInput = 1,
     rotation_axis: RotationAxisRecovery = "z",
     *,
@@ -114,22 +114,19 @@ def __prepare_images(
     max_pad: MaxPadInput = False,
     safe_pad: SafePadInput = False,
 ) -> None:
-    target_shape = np.array(images[0].resolution) * (spacing or 1.0)
-    target_shape /= max(target_shape) / (resize or 1.0)
+    target_shape = np.array(images[0].resolution, dtype=float) * spacing
+    target_shape /= max(target_shape) / (resize or 1)
+
     for im in images:
         im.resize_to_shape(tuple(target_shape.round().astype(int)))
 
     if max_pad:
         for im in images:
-            im.pad_to_max()
+            im.pad_equal_sides()
 
     if safe_pad:
         for im in images:
-            im.pad_safe_rotation()
-
-    if resize:
-        for im in images:
-            im.resize_to_shape(resize)
+            im.pad_safe_rotation(keep_shape=True)
 
 
 def __start_napari(
