@@ -1,11 +1,13 @@
+"""TODO."""
+
 from collections.abc import Sequence
-from pathlib import Path
-from typing import Annotated, Final, Literal, Optional, TypeAlias
+from typing import Final, Literal
 
 import napari
 import numpy as np
-from click import Choice
-from imreg3d.image import Image, Image3D, Paths3DImageLoader
+from cyclopts import App
+from cyclopts.types import File, PositiveInt
+from imreg3d.image import Image
 from imreg3d.registration import (
     BaseRegistration,
     Keller3DRegistration,
@@ -13,12 +15,11 @@ from imreg3d.registration import (
     TranslationFFT3DRegistration,
 )
 from napari.layers import Image as NapariImage
-from typer import Option, Typer
 
 from ._widget import TransformationWidget
 
-FloatOrNone: TypeAlias = Optional[float]  # noqa: UP007
-IntOrNone: TypeAlias = Optional[int]  # noqa: UP007
+RegistrationMethod3D = Literal["keller", "rotationaxis", "translation"]
+RotationAxis3D = Literal["x", "y", "z"]
 
 REGISTRATION_METHODS: Final[dict[str, type[BaseRegistration]]] = {
     "keller": Keller3DRegistration,
@@ -27,29 +28,20 @@ REGISTRATION_METHODS: Final[dict[str, type[BaseRegistration]]] = {
 }
 REGISTRATION_CHOICES = list(REGISTRATION_METHODS.keys())
 
-RegistrationMethod3D = Annotated[str, Option(click_type=Choice(REGISTRATION_CHOICES))]
-RotationInput = Annotated[FloatOrNone, Option()]
-ScaleInput = Annotated[FloatOrNone, Option(min=0)]
-UpsampleFactorInput = Annotated[int, Option(min=1)]
-ResizeInput = Annotated[IntOrNone, Option(min=1)]
-SafePadInput = Annotated[bool, Option()]
-MaxPadInput = Annotated[bool, Option()]
-RotationAxisRecovery = Annotated[str, Option(click_type=Choice(["x", "y", "z"]))]
-
-cli = Typer()
+app = App()
 
 
-@cli.command()
+@app.command
 def register(
-    image_paths: tuple[Path, Path],
+    image_paths: tuple[File, File],
     method: RegistrationMethod3D = "keller",
-    resize: ResizeInput = 64,
+    resize: int | None = 64,
     spacing: tuple[float, float, float] = (1, 1, 1),
-    upsample_factor: UpsampleFactorInput = 1,
-    rotation_axis: RotationAxisRecovery = "z",
+    upsample_factor: PositiveInt = 1,
+    rotation_axis: RotationAxis3D = "z",
     *,
-    max_pad: MaxPadInput = False,
-    safe_pad: SafePadInput = False,
+    max_pad: bool = False,
+    safe_pad: bool = False,
     debug: bool = False,
 ):
     """Manually transform the 'moving' image and auto-register with 'fixed' image.
@@ -62,9 +54,11 @@ def register(
     The first input is the 'fixed' image. The second image is the
     'moving' image.
     """
+    from imreg3d.image import Paths3DImageLoader
+
     images = list(Paths3DImageLoader(image_paths))
-    __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
-    __start_napari(
+    _prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    _start_napari(
         images[::-1],
         method,
         "register",
@@ -75,17 +69,17 @@ def register(
     )
 
 
-@cli.command()
+@app.command
 def transform(
-    image_path: Path,
+    image_path: File,
     method: RegistrationMethod3D = "keller",
-    resize: ResizeInput = 64,
+    resize: int | None = 64,
     spacing: tuple[float, float, float] = (1, 1, 1),
-    upsample_factor: UpsampleFactorInput = 1,
-    rotation_axis: RotationAxisRecovery = "z",
+    upsample_factor: PositiveInt = 1,
+    rotation_axis: RotationAxis3D = "z",
     *,
-    max_pad: MaxPadInput = False,
-    safe_pad: SafePadInput = False,
+    max_pad: bool = False,
+    safe_pad: bool = False,
     debug: bool = False,
 ):
     """Manually transform and auto-register the original image and a copy of it.
@@ -93,9 +87,11 @@ def transform(
     This mode can be used to test any 3D registration method by
     transformed to be registered with the fixed image.
     """
+    from imreg3d.image import Image3D
+
     images = [Image3D.from_path(image_path)]
-    __prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
-    __start_napari(
+    _prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    _start_napari(
         images,
         method,
         "transform",
@@ -106,13 +102,13 @@ def transform(
     )
 
 
-def __prepare_images(
+def _prepare_images(
     images: Sequence[Image],
-    resize: ResizeInput,
+    resize: int | None,
     spacing: tuple[float, ...] | None = None,
     *,
-    max_pad: MaxPadInput = False,
-    safe_pad: SafePadInput = False,
+    max_pad: bool = False,
+    safe_pad: bool = False,
 ) -> None:
     target_shape = np.array(images[0].resolution, dtype=float) * spacing
     target_shape /= max(target_shape) / (resize or 1)
@@ -129,16 +125,16 @@ def __prepare_images(
             im.pad_safe_rotation(keep_shape=True)
 
 
-def __start_napari(
+def _start_napari(
     images: Sequence[Image],
     method: RegistrationMethod3D,
     mode: Literal["transform", "register"],
     spacing: tuple[float, float, float] | None,
-    upsample_factor: UpsampleFactorInput = 1,
-    rotation_axis: RotationAxisRecovery = "z",
+    upsample_factor: PositiveInt = 1,
+    rotation_axis: RotationAxis3D = "z",
     *,
     debug: bool = False,
-):
+) -> None:
     registration = REGISTRATION_METHODS[method](
         upsample_factor=upsample_factor, axis=rotation_axis, debug=debug
     )
@@ -154,7 +150,3 @@ def __start_napari(
         )
     )
     napari.run()
-
-
-if __name__ == "__main__":
-    cli()
