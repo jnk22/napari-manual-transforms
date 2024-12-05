@@ -12,14 +12,14 @@ from cachetools import cached
 from cachetools.keys import hashkey
 from imreg3d.fusion import MergeFusion
 from imreg3d.registration import BaseRegistration, Keller3DRegistration
-from imreg3d.transform import transformation_matrix, warp
+from imreg3d.transform import transform, transform_matrix
 from loguru import logger
 from napari.layers import Image
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
 
 from ._model import MINIMUM_SCALE
-from ._tform_widget import TransformationView
+from ._tform_widget import RegistrationConfig, TransformationView
 from ._util import _Quaternion, transform_array_3d
 
 if TYPE_CHECKING:
@@ -27,6 +27,11 @@ if TYPE_CHECKING:
     import napari.viewer
     from napari.utils.events import Event
     from numpy.typing import NDArray
+
+
+def norm_arr(image: NDArray, minx: float | None = None) -> NDArray:
+    minx = minx if minx is not None else np.min(image)
+    return (image - minx) / (np.max(image) - minx)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,19 +54,35 @@ class HashableArray:
 
 @cached(
     cache={},
-    key=lambda _registration, tform, _origin, _fixed, _moving: hashkey(tform),
+    key=lambda _registration, config, tform, _origin, _fixed, _moving: hashkey(
+        tform, config
+    ),
 )
 def update_images_cached(
     registration: BaseRegistration,
+    config: RegistrationConfig,
     transformation: HashableArray,
     origin: NDArray,
     fixed: NDArray,
     moving: NDArray,
 ) -> tuple[NDArray, list[Image]]:
+    fixed = fixed.copy()
+    moving = moving.copy()
+
+    if config.normalize:
+        minx = min(fixed.min(), moving.min())
+        fixed = norm_arr(fixed, minx=minx)
+        moving = norm_arr(moving, minx=minx)
+
+    fixed[fixed < config.threshold] = 0
+    moving[moving < config.threshold] = 0
+
     tform_matrix = transformation.to_ndarray()
     logger.info(f"Transformation matrix: {tform_matrix}")
 
-    moving_trans = warp(moving, tform_matrix, dim=3, inverse=True)
+    moving_trans = transform(moving, matrix=tform_matrix, dim=3, inverse=True)
+    moving_trans[moving_trans < config.threshold] = 0
+
     result = registration.register(fixed, moving_trans)
     logger.info(f"Registration result: {result.transformation}")
     logger.info(f"Registration duration: {result.duration:.2f}s")
@@ -70,7 +91,7 @@ def update_images_cached(
         msg = "Registration failed"
         raise ValueError(msg)
 
-    recovery_matrix = transformation_matrix(
+    recovery_matrix = transform_matrix(
         dim=3,
         translation=result.transformation.translation,
         rotation=result.transformation.rotation,
@@ -79,22 +100,27 @@ def update_images_cached(
     )
     logger.info(f"Recovery matrix: {recovery_matrix}")
 
-    recovered = warp(moving_trans, recovery_matrix, dim=3, inverse=True)
+    recovered = transform(moving_trans, matrix=recovery_matrix, dim=3, inverse=True)
     fused = MergeFusion().fuse(fixed, recovered)
 
     full_matrix = recovery_matrix @ tform_matrix
     logger.info(f"Final matrix: {full_matrix}")
 
     if registration.debug:
-        debug_images_2d = [
-            Image(np.expand_dims(im.data, axis=0), name=im.name)
-            for im in registration.debug_images["registration"]
-        ]
-        scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
-        debug_images_3d = [
-            Image(im.data, name=im.name, scale=scale)
-            for im in registration.debug_images_3d["registration"]
-        ]
+        # FIX: Must be updated.
+        debug_images_2d = []
+        debug_images_3d = []
+        scale = (1,) * 3
+
+        # debug_images_2d = [
+        #     Image(np.expand_dims(im.data, axis=0), name=im.name)
+        #     for im in registration.debug_images["registration"]
+        # ]
+        # scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
+        # debug_images_3d = [
+        #     Image(im.data, name=im.name, scale=scale)
+        #     for im in registration.debug_images_3d["registration"]
+        # ]
     else:
         debug_images_2d = []
         debug_images_3d = []
@@ -251,11 +277,12 @@ class TransformationWidget(LayerFollower, TransformationView):
                     case _:
                         return
 
+                config = RegistrationConfig(
+                    self._model.config_threshold, self._model.config_normalize
+                )
+                tform = HashableArray.from_ndarray(self._model.transform)
                 tform_matrix, updated_layers = update_images_cached(
-                    self._registration,
-                    HashableArray.from_ndarray(self._model.transform),
-                    self._model.origin,
-                    *images,
+                    self._registration, config, tform, self._model.origin, *images
                 )
 
                 self._tform_matrix = tform_matrix

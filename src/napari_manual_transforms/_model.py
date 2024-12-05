@@ -87,6 +87,8 @@ class TransformationModel:
         self._t = np.array([0, 0, 0])
         self._s = 1.0
         self._rotation_axis = (0, 1, 0)
+        self.config_threshold: float = 0
+        self.config_normalize: bool = False
         if translation is not None:
             self.translation = translation
         if scale is not None:

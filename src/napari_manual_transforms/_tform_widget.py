@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -15,7 +17,13 @@ from qtpy.QtWidgets import (
 )
 from superqt import QCollapsible, QLabeledDoubleSlider, QLabeledSlider, utils
 
-from ._model import MINIMUM_SCALE, TransformationModel
+from ._model import TransformationModel
+
+
+@dataclass(eq=True, frozen=True, slots=True)
+class RegistrationConfig:
+    threshold: float = 0
+    normalize: bool = False
 
 
 class _TransformationComponent(QWidget):
@@ -209,6 +217,30 @@ class ScaleView(_TransformationComponent):
             self.spin_box.setValue(self._model.scale)
 
 
+class ThresholdView(_TransformationComponent):
+    def _add_gui(self):
+        self.spin_box: QDoubleSpinBox = QDoubleSpinBox()
+        self.spin_box.setSingleStep(0.000001)
+        self.spin_box.setDecimals(6)
+        self.spin_box.setMinimum(0.0)
+        self.spin_box.setMaximum(1.0)
+        self.spin_box.valueChanged.connect(self._on_change)
+        self.layout().addRow("Threshold", self.spin_box)
+
+        self.checkbox: QCheckBox = QCheckBox()
+        self.checkbox.stateChanged.connect(self._on_change)
+        self.layout().addRow("Normalization", self.checkbox)
+
+    def _on_change(self):
+        self._model.config_threshold = self.spin_box.value()
+        self._model.config_normalize = self.checkbox.isChecked()
+
+    def _update(self) -> None:
+        with utils.signals_blocked(self.spin_box):
+            self.spin_box.setValue(self._model.config_threshold)
+            self.checkbox.setChecked(self._model.config_normalize)
+
+
 class _Collapsible(QCollapsible):
     def __init__(self, title: str, widget, parent: Optional[QWidget] = None):
         super().__init__(title, parent)
@@ -217,7 +249,7 @@ class _Collapsible(QCollapsible):
 
 
 class TransformationView(QWidget):
-    def __init__(self, model: Optional[TransformationModel] = None, parent=None):
+    def __init__(self, model: TransformationModel | None = None, parent=None):
         super().__init__(parent)
         self._model: TransformationModel = model or TransformationModel()
 
@@ -227,12 +259,14 @@ class TransformationView(QWidget):
         self._o_view = OriginView(self._model)
         self._t_view = TranslationView(self._model)
         self._s_view = ScaleView(self._model)
+        self._c_t_view = ThresholdView(self._model)
         self._q_view.layout().setContentsMargins(0, 0, 0, 0)
         self._e_view.layout().setContentsMargins(0, 0, 0, 0)
         self._a_view.layout().setContentsMargins(0, 0, 0, 0)
         self._o_view.layout().setContentsMargins(0, 0, 0, 0)
         self._t_view.layout().setContentsMargins(0, 0, 0, 0)
         self._s_view.layout().setContentsMargins(0, 0, 0, 0)
+        self._c_t_view.layout().setContentsMargins(0, 0, 0, 0)
 
         qq = _Collapsible("Quaternion", self._q_view)
         qe = _Collapsible("Euler Angle", self._e_view)
@@ -240,6 +274,7 @@ class TransformationView(QWidget):
         qo = _Collapsible("Origin", self._o_view)
         qt = _Collapsible("Translation", self._t_view)
         qs = _Collapsible("Scale", self._s_view)
+        qct = _Collapsible("Threshold", self._c_t_view)
 
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(qq)
@@ -248,6 +283,7 @@ class TransformationView(QWidget):
         self.layout().addWidget(qo)
         self.layout().addWidget(qt)
         self.layout().addWidget(qs)
+        self.layout().addWidget(qct)
 
         self._reset_tform = QPushButton("reset transformation")
         self._reset_tform.clicked.connect(self._reset_transformation)
