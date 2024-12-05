@@ -1,10 +1,11 @@
 """TODO."""
 
+import os
+import sys
 from collections.abc import Sequence
 from typing import Final, Literal
 
 import napari
-import numpy as np
 from cyclopts import App
 from cyclopts.types import File, PositiveInt
 from imreg3d.image import Image
@@ -14,6 +15,7 @@ from imreg3d.registration import (
     RotationAxis3DRegistration,
     TranslationFFT3DRegistration,
 )
+from loguru import logger
 from napari.layers import Image as NapariImage
 
 from ._widget import TransformationWidget
@@ -30,13 +32,16 @@ REGISTRATION_CHOICES = list(REGISTRATION_METHODS.keys())
 
 app = App()
 
+logger.remove()
+logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", "INFO"))
+
 
 @app.command
 def register(
     image_paths: tuple[File, File],
     method: RegistrationMethod3D = "keller",
     resize: int | None = 64,
-    spacing: tuple[float, float, float] = (1, 1, 1),
+    spacing: tuple[float, float, float] | None = None,
     upsample_factor: PositiveInt = 1,
     rotation_axis: RotationAxis3D = "z",
     *,
@@ -74,7 +79,7 @@ def transform(
     image_path: File,
     method: RegistrationMethod3D = "keller",
     resize: int | None = 64,
-    spacing: tuple[float, float, float] = (1, 1, 1),
+    spacing: tuple[float, float, float] | None = None,
     upsample_factor: PositiveInt = 1,
     rotation_axis: RotationAxis3D = "z",
     *,
@@ -105,24 +110,20 @@ def transform(
 def _prepare_images(
     images: Sequence[Image],
     resize: int | None,
-    spacing: tuple[float, ...] | None = None,
+    spacing: tuple[float, float, float] | None = None,
     *,
     max_pad: bool = False,
     safe_pad: bool = False,
 ) -> None:
-    target_shape = np.array(images[0].resolution, dtype=float) * spacing
-    target_shape /= max(target_shape) / (resize or 1)
-
     for im in images:
-        im.resize_to_shape(tuple(target_shape.round().astype(int)))
-
-    if max_pad:
-        for im in images:
+        if spacing:
+            im.apply_spacing(spacing, max_size=resize)
+        if max_pad:
             im.pad_equal_sides()
-
-    if safe_pad:
-        for im in images:
-            im.pad_safe_rotation(keep_shape=True)
+        if safe_pad:
+            im.pad_safe_rotation()
+        if resize:
+            im.resize_to_shape(resize)
 
 
 def _start_napari(
