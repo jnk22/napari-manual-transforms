@@ -45,6 +45,7 @@ def register(
     upsample_factor: PositiveInt = 1,
     rotation_axis: RotationAxis3D = "z",
     *,
+    normalize: bool = True,
     max_pad: bool = False,
     safe_pad: bool = False,
     debug: bool = False,
@@ -62,7 +63,14 @@ def register(
     from imreg3d.image import Paths3DImageLoader
 
     images = list(Paths3DImageLoader(image_paths))
-    _prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    _prepare_images(
+        images,
+        normalize=normalize,
+        resize=resize,
+        spacing=spacing,
+        max_pad=max_pad,
+        safe_pad=safe_pad,
+    )
     _start_napari(
         images[::-1],
         method,
@@ -83,6 +91,7 @@ def transform(
     upsample_factor: PositiveInt = 1,
     rotation_axis: RotationAxis3D = "z",
     *,
+    normalize: bool = True,
     max_pad: bool = False,
     safe_pad: bool = False,
     debug: bool = False,
@@ -95,7 +104,14 @@ def transform(
     from imreg3d.image import Image3D
 
     images = [Image3D.from_path(image_path)]
-    _prepare_images(images, resize, spacing, max_pad=max_pad, safe_pad=safe_pad)
+    _prepare_images(
+        images,
+        normalize=normalize,
+        resize=resize,
+        spacing=spacing,
+        max_pad=max_pad,
+        safe_pad=safe_pad,
+    )
     _start_napari(
         images,
         method,
@@ -109,13 +125,16 @@ def transform(
 
 def _prepare_images(
     images: Sequence[Image],
-    resize: int | None,
-    spacing: tuple[float, float, float] | None = None,
     *,
+    normalize: bool,
+    resize: int | None,
+    spacing: tuple[float, float, float] | None,
     max_pad: bool = False,
     safe_pad: bool = False,
 ) -> None:
     for im in images:
+        if normalize:
+            im.normalize()
         if spacing:
             im.apply_spacing(spacing, max_size=resize)
         if max_pad:

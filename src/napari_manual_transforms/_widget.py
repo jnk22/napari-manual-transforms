@@ -16,6 +16,7 @@ from imreg3d.transform import transform, transform_matrix
 from loguru import logger
 from napari.layers import Image
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
+from skimage.exposure import rescale_intensity
 from vispy.util.keys import ALT
 
 from ._model import MINIMUM_SCALE
@@ -70,9 +71,10 @@ def update_images_cached(
     moving = moving.copy()
 
     if config.normalize:
-        minx = min(fixed.min(), moving.min())
-        fixed = norm_arr(fixed, minx=minx)
-        moving = norm_arr(moving, minx=minx)
+        in_range = np.min([fixed, moving]), np.max([fixed, moving])
+        fixed, moving = (
+            rescale_intensity(d, in_range=in_range) for d in (fixed, moving)
+        )
 
     fixed[fixed < config.threshold] = 0
     moving[moving < config.threshold] = 0
