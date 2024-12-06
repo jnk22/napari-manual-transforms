@@ -1,10 +1,10 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
 import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -23,7 +23,6 @@ from ._model import TransformationModel
 @dataclass(eq=True, frozen=True, slots=True)
 class RegistrationConfig:
     threshold: float = 0
-    normalize: bool = False
 
 
 class _TransformationComponent(QWidget):
@@ -227,18 +226,12 @@ class ThresholdView(_TransformationComponent):
         self.spin_box.valueChanged.connect(self._on_change)
         self.layout().addRow("Threshold", self.spin_box)
 
-        self.checkbox: QCheckBox = QCheckBox()
-        self.checkbox.stateChanged.connect(self._on_change)
-        self.layout().addRow("Normalization", self.checkbox)
-
     def _on_change(self):
         self._model.config_threshold = self.spin_box.value()
-        self._model.config_normalize = self.checkbox.isChecked()
 
     def _update(self) -> None:
         with utils.signals_blocked(self.spin_box):
             self.spin_box.setValue(self._model.config_threshold)
-            self.checkbox.setChecked(self._model.config_normalize)
 
 
 class _Collapsible(QCollapsible):

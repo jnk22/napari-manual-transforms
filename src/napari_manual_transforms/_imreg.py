@@ -133,14 +133,14 @@ def _prepare_images(
     safe_pad: bool = False,
 ) -> None:
     for im in images:
-        if normalize:
-            im.normalize()
         if spacing:
             im.apply_spacing(spacing, max_size=resize)
+        if normalize:
+            im.normalize()
         if max_pad:
             im.pad_equal_sides()
         if safe_pad:
-            im.pad_safe_rotation()
+            im.pad_safe_rotation(keep_shape=resize is None)
         if resize:
             im.resize_to_shape(resize)
 

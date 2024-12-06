@@ -16,7 +16,6 @@ from imreg3d.transform import transform, transform_matrix
 from loguru import logger
 from napari.layers import Image
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
-from skimage.exposure import rescale_intensity
 from vispy.util.keys import ALT
 
 from ._model import MINIMUM_SCALE
@@ -69,12 +68,6 @@ def update_images_cached(
 ) -> tuple[NDArray, list[Image]]:
     fixed = fixed.copy()
     moving = moving.copy()
-
-    if config.normalize:
-        in_range = np.min([fixed, moving]), np.max([fixed, moving])
-        fixed, moving = (
-            rescale_intensity(d, in_range=in_range) for d in (fixed, moving)
-        )
 
     fixed[fixed < config.threshold] = 0
     moving[moving < config.threshold] = 0
@@ -279,12 +272,12 @@ class TransformationWidget(LayerFollower, TransformationView):
                     case _:
                         return
 
-                config = RegistrationConfig(
-                    self._model.config_threshold, self._model.config_normalize
-                )
-                tform = HashableArray.from_ndarray(self._model.transform)
                 tform_matrix, updated_layers = update_images_cached(
-                    self._registration, config, tform, self._model.origin, *images
+                    self._registration,
+                    RegistrationConfig(self._model.config_threshold),
+                    HashableArray.from_ndarray(self._model.transform),
+                    self._model.origin,
+                    *images,
                 )
 
                 self._tform_matrix = tform_matrix
