@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,8 +12,10 @@ import numpy as np
 from cachetools import cached
 from cachetools.keys import hashkey
 from imreg3d.fusion import MergeFusion
+from imreg3d.image import Device
 from imreg3d.registration import BaseRegistration, Keller3DRegistration
 from imreg3d.transform import transform, transform_matrix
+from imreg3d.utils import to_device_array
 from loguru import logger
 from napari.layers import Image
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
@@ -78,9 +81,13 @@ def update_images_cached(
     moving_trans = transform(moving, matrix=tform_matrix, dim=3, inverse=True)
     moving_trans[moving_trans < config.threshold] = 0
 
-    result = registration.register(fixed, moving_trans)
+    device: Device = os.getenv("DEVICE", "cpu")
+    fixed_c = to_device_array(fixed, device=device)
+    moving_trans_c = to_device_array(moving_trans, device=device)
+
+    result = registration.register(fixed_c, moving_trans_c)
     logger.info(f"Registration result: {result.transformation}")
-    logger.info(f"Registration duration: {result.duration:.2f}s")
+    logger.info(f"Registration duration: {result.total_duration:.2f}s")
 
     if result.transformation is None:
         msg = "Registration failed"

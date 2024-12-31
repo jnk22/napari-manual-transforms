@@ -61,16 +61,20 @@ def register(
     'moving' image.
     """
     from imreg3d.image import Paths3DImageLoader
+    from imreg3d.utils.image import prepare_benchmark_image
 
     images = list(Paths3DImageLoader(image_paths))
-    _prepare_images(
-        images,
-        normalize=normalize,
-        resize=resize,
-        spacing=spacing,
-        max_pad=max_pad,
-        safe_pad=safe_pad,
-    )
+
+    for im in images:
+        prepare_benchmark_image(
+            im,
+            normalize=normalize,
+            resize=resize,
+            spacing=spacing,
+            max_pad=max_pad,
+            safe_pad=safe_pad,
+        )
+
     _start_napari(
         images[::-1],
         method,
@@ -102,16 +106,20 @@ def transform(
     transformed to be registered with the fixed image.
     """
     from imreg3d.image import Image3D
+    from imreg3d.utils.image import prepare_benchmark_image
 
     images = [Image3D.from_path(image_path)]
-    _prepare_images(
-        images,
-        normalize=normalize,
-        resize=resize,
-        spacing=spacing,
-        max_pad=max_pad,
-        safe_pad=safe_pad,
-    )
+
+    for im in images:
+        prepare_benchmark_image(
+            im,
+            normalize=normalize,
+            resize=resize,
+            spacing=spacing,
+            max_pad=max_pad,
+            safe_pad=safe_pad,
+        )
+
     _start_napari(
         images,
         method,
@@ -121,28 +129,6 @@ def transform(
         rotation_axis,
         debug=debug,
     )
-
-
-def _prepare_images(
-    images: Sequence[Image],
-    *,
-    normalize: bool,
-    resize: int | None,
-    spacing: tuple[float, float, float] | None,
-    max_pad: bool = False,
-    safe_pad: bool = False,
-) -> None:
-    for im in images:
-        if spacing:
-            im.apply_spacing(spacing, max_size=resize)
-        if normalize:
-            im.normalize()
-        if max_pad:
-            im.pad_equal_sides()
-        if safe_pad:
-            im.pad_safe_rotation(keep_shape=resize is None)
-        if resize:
-            im.resize_to_shape(resize)
 
 
 def _start_napari(
