@@ -1,24 +1,26 @@
 """TODO."""
 
+from __future__ import annotations
+
 import os
 import sys
-from collections.abc import Sequence
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 import napari
 from cyclopts import App
-from cyclopts.types import File, PositiveInt
-from imreg3d.image import Image
-from imreg3d.registration import (
+from cyclopts.types import File, PositiveInt  # noqa: TC002
+from loguru import logger
+from ndimreg.registration import (
     BaseRegistration,
     Keller3DRegistration,
     RotationAxis3DRegistration,
     TranslationFFT3DRegistration,
 )
-from loguru import logger
-from napari.layers import Image as NapariImage
 
-from ._widget import TransformationWidget
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ndimreg.image import Image
 
 RegistrationMethod3D = Literal["keller", "rotationaxis", "translation"]
 RotationAxis3D = Literal["x", "y", "z"]
@@ -37,7 +39,7 @@ logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 @app.command
-def register(
+def register(  # noqa: PLR0913
     image_paths: tuple[File, File],
     method: RegistrationMethod3D = "keller",
     resize: int | None = 64,
@@ -49,7 +51,7 @@ def register(
     max_pad: bool = False,
     safe_pad: bool = False,
     debug: bool = False,
-):
+) -> None:
     """Manually transform the 'moving' image and auto-register with 'fixed' image.
 
     This mode can be used to test any 3D registration method by
@@ -60,8 +62,8 @@ def register(
     The first input is the 'fixed' image. The second image is the
     'moving' image.
     """
-    from imreg3d.image import Paths3DImageLoader
-    from imreg3d.utils.image import prepare_benchmark_image
+    from ndimreg.image import Paths3DImageLoader
+    from ndimreg.utils.image import prepare_benchmark_image
 
     images = list(Paths3DImageLoader(image_paths))
 
@@ -87,7 +89,7 @@ def register(
 
 
 @app.command
-def transform(
+def transform(  # noqa: PLR0913
     image_path: File,
     method: RegistrationMethod3D = "keller",
     resize: int | None = 64,
@@ -99,14 +101,14 @@ def transform(
     max_pad: bool = False,
     safe_pad: bool = False,
     debug: bool = False,
-):
+) -> None:
     """Manually transform and auto-register the original image and a copy of it.
 
     This mode can be used to test any 3D registration method by
     transformed to be registered with the fixed image.
     """
-    from imreg3d.image import Image3D
-    from imreg3d.utils.image import prepare_benchmark_image
+    from ndimreg.image import Image3D
+    from ndimreg.utils.image import prepare_benchmark_image
 
     images = [Image3D.from_path(image_path)]
 
@@ -131,7 +133,7 @@ def transform(
     )
 
 
-def _start_napari(
+def _start_napari(  # noqa: PLR0913
     images: Sequence[Image],
     method: RegistrationMethod3D,
     mode: Literal["transform", "register"],
@@ -141,8 +143,15 @@ def _start_napari(
     *,
     debug: bool = False,
 ) -> None:
+    from napari.layers import Image as NapariImage
+
+    from ._widget import TransformationWidget
+
     registration = REGISTRATION_METHODS[method](
-        upsample_factor=upsample_factor, axis=rotation_axis, debug=debug
+        upsample_factor=upsample_factor,
+        axis=rotation_axis,
+        debug=debug,
+        rotation_axis_normalization=False,
     )
 
     v = napari.Viewer()

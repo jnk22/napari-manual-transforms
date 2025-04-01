@@ -11,9 +11,6 @@ line-length = 79
 profile = "black"
 line_length = 79
 
-[tool.uv.sources]
-imreg3d = { path = "../imreg3d" }
-
 [project]
 name = "napari-manual-transforms"
 version = "0.0.0"
@@ -25,10 +22,15 @@ keywords = []
 requires-python = ">=3.11"
 classifiers = []
 
-# TODO: Pin dependencies to a minimum version.
 dependencies = [
-  "imreg3d",
+  "ndimreg",
   "cachetools",
+]
+
+[project.optional-dependencies]
+cuda12 = [
+  "cupy-cuda12x>=13.3.0",
+  "cucim-cu12>=24.10.0",
 ]
 
 [project.scripts]

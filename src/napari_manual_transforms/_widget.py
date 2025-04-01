@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
 import numpy as np
+import pytransform3d.rotations as pr
 from cachetools import cached
 from cachetools.keys import hashkey
-from imreg3d.fusion import MergeFusion
-from imreg3d.image import Device
-from imreg3d.registration import BaseRegistration, Keller3DRegistration
-from imreg3d.transform import transform, transform_matrix
-from imreg3d.utils import to_device_array
 from loguru import logger
 from napari.layers import Image
+from ndimreg.fusion import MergeFusion
+from ndimreg.registration import BaseRegistration, Keller3DRegistration
+from ndimreg.transform import transform, transform_matrix
+from ndimreg.utils import to_device_array
 from qtpy.QtWidgets import QCheckBox, QLabel, QPushButton, QWidget
 from vispy.util.keys import ALT
 
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     import napari.layers
     import napari.viewer
     from napari.utils.events import Event
+    from ndimreg.image import Device
     from numpy.typing import NDArray
 
 
@@ -69,6 +70,7 @@ def update_images_cached(
     fixed: NDArray,
     moving: NDArray,
 ) -> tuple[NDArray, list[Image]]:
+    # fixed = transform(fixed, rotation=pr.random_quaternion(), dim=3).copy()
     fixed = fixed.copy()
     moving = moving.copy()
 
@@ -76,16 +78,18 @@ def update_images_cached(
     moving[moving < config.threshold] = 0
 
     tform_matrix = transformation.to_ndarray()
-    logger.info(f"Transformation matrix: {tform_matrix}")
+    logger.info(f"Transformation matrix:\n{tform_matrix}")
 
     moving_trans = transform(moving, matrix=tform_matrix, dim=3, inverse=True)
     moving_trans[moving_trans < config.threshold] = 0
 
-    device: Device = os.getenv("DEVICE", "cpu")
-    fixed_c = to_device_array(fixed, device=device)
-    moving_trans_c = to_device_array(moving_trans, device=device)
+    device_env = os.getenv("DEVICE", "cpu").lower().strip()
+    device: Device = device_env if device_env in {"cpu", "gpu"} else "cpu"  # type: ignore[reportAssignmentType]
 
-    result = registration.register(fixed_c, moving_trans_c)
+    result = registration.register(
+        to_device_array(fixed, device=device),
+        to_device_array(moving_trans, device=device),
+    )
     logger.info(f"Registration result: {result.transformation}")
     logger.info(f"Registration duration: {result.total_duration:.2f}s")
 
@@ -100,13 +104,13 @@ def update_images_cached(
         scale=result.transformation.scale,
         origin=origin,
     )
-    logger.info(f"Recovery matrix: {recovery_matrix}")
+    logger.info(f"Recovery matrix:\n{recovery_matrix}")
 
     recovered = transform(moving_trans, matrix=recovery_matrix, dim=3, inverse=True)
     fused = MergeFusion().fuse(fixed, recovered)
 
     full_matrix = recovery_matrix @ tform_matrix
-    logger.info(f"Final matrix: {full_matrix}")
+    logger.info(f"Final matrix:\n{full_matrix}")
 
     if registration.debug:
         # FIX: Must be updated.
