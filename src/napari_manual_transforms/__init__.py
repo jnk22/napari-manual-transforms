@@ -6,6 +6,7 @@ except metadata.PackageNotFoundError:
     # package is not installed
     __version__ = "uninstalled"
 
-from ._widget import TransformationWidget
-
-__all__ = ["TransformationWidget"]
+# NOTE: Removed as it makes the CLI command very slow.
+# from ._widget import TransformationWidget
+#
+# __all__ = ["TransformationWidget"]
