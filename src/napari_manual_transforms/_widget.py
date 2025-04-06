@@ -201,7 +201,6 @@ class LayerFollower(QWidget):
 class TransformationWidget(LayerFollower, TransformationView):
     def __init__(
         self,
-        mode: Literal["transform", "register"] | None = None,
         viewer: napari.viewer.Viewer | None = None,
         parent=None,
         registration: BaseRegistration | None = None,
@@ -210,7 +209,6 @@ class TransformationWidget(LayerFollower, TransformationView):
         auto_registration: bool = True,
         spacing: tuple[float, float, float] | None = None,
     ):
-        self._mode: Literal["transform", "register"] | None = mode
         self._spacing: tuple[float, float, float] | None = spacing
         self._registration: BaseRegistration = registration or Keller3DRegistration()
         self._tform_matrix: NDArray | None = None
@@ -275,24 +273,16 @@ class TransformationWidget(LayerFollower, TransformationView):
         with self._model.valueChanged.blocked():
             self._active.affine = self._model.transform
             if self._auto_registration_checkbox.isChecked() and self._viewer:
-                match self._mode:
-                    case "transform":
-                        images = (np.asarray(self._active.data),) * 2
-                    case "register":
-                        images = (x.data for x in self._viewer.layers[1::-1])
-                    case _:
-                        return
-
                 tform_matrix, updated_layers = update_images_cached(
                     self._registration,
                     RegistrationConfig(self._model.config_threshold),
                     HashableArray.from_ndarray(self._model.transform),
                     self._model.origin,
-                    *images,
+                    *(x.data for x in self._viewer.layers[1::-1]),
                 )
 
                 self._tform_matrix = tform_matrix
-                idx = 1 if self._mode == "transform" else 2
+                idx = 2
 
                 if len(self._viewer.layers) == idx:
                     self._viewer.layers.extend(updated_layers)
@@ -410,13 +400,7 @@ class TransformationWidget(LayerFollower, TransformationView):
             self._viewer.screenshot(str(screenshot_full_path), canvas_only=False)
             self._viewer.screenshot(str(screenshot_canvas_path), canvas_only=True)
 
-            match self._mode:
-                case "transform":
-                    image_names = (self._viewer.layers[0].name,) * 2
-                case "register":
-                    image_names = (im.name for im in self._viewer.layers[1::-1])
-                case _:
-                    image_names = ("unknown",) * 2
+            image_names = (im.name for im in self._viewer.layers[1::-1])
 
             size = len(self._viewer.layers[0].data)
             spacing = ":".join(str(v) for v in self._spacing) if self._spacing else "/"

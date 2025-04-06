@@ -1,158 +1,90 @@
-"""TODO."""
+"""CLI module for image registration using 'ndimreg'."""
 
 from __future__ import annotations
 
-import os
-import sys
-from typing import TYPE_CHECKING, Final, Literal
+from typing import Final, Literal
 
-import napari
 from cyclopts import App
-from cyclopts.types import File, PositiveInt  # noqa: TC002
-from loguru import logger
-from ndimreg.registration import (
-    BaseRegistration,
-    Keller3DRegistration,
-    RotationAxis3DRegistration,
-    TranslationFFT3DRegistration,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from ndimreg.image import Image
+from cyclopts.types import File, Json  # noqa: TC002
 
 RegistrationMethod3D = Literal["keller", "rotationaxis", "translation"]
 RotationAxis3D = Literal["x", "y", "z"]
+LogLevel = Literal["info", "warning", "error", "trace", "debug", "success", "critical"]
 
-REGISTRATION_METHODS: Final[dict[str, type[BaseRegistration]]] = {
-    "keller": Keller3DRegistration,
-    "translation": TranslationFFT3DRegistration,
-    "rotationaxis": RotationAxis3DRegistration,
-}
-REGISTRATION_CHOICES = list(REGISTRATION_METHODS.keys())
+EMPTY_OPTIONS: Final[dict] = {}
 
 app = App()
 
-logger.remove()
-logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", "INFO"))
 
-
-@app.command
+@app.default
 def register(  # noqa: PLR0913
-    image_paths: tuple[File, File],
-    method: RegistrationMethod3D = "keller",
-    resize: int | None = 64,
-    spacing: tuple[float, float, float] | None = None,
-    upsample_factor: PositiveInt = 1,
-    rotation_axis: RotationAxis3D = "z",
+    image_paths: list[File],
     *,
+    method: RegistrationMethod3D = "keller",
+    axis: RotationAxis3D = "z",
+    options: Json | dict = EMPTY_OPTIONS,
+    spacing: tuple[float, float, float] | None = None,
     normalize: bool = True,
     max_pad: bool = False,
     safe_pad: bool = False,
+    resize: int | None = None,
     debug: bool = False,
+    log_level: LogLevel = "info",
 ) -> None:
     """Manually transform the 'moving' image and auto-register with 'fixed' image.
 
-    This mode can be used to test any 3D registration method by
-    registering two input images. Both input will images will be loaded
-    as 'fixed' and 'moving' while the moving image can be freely
-    transformed to be registered with the fixed image.
-
-    The first input is the 'fixed' image. The second image is the
-    'moving' image.
+    Arguments
+    ---------
+    image_paths
+        One or two image. The first input is the 'fixed' image. The
+        second image is the 'moving' image. If only one image is
+        provided, its copy is used as moving image.
     """
-    from ndimreg.image import Paths3DImageLoader
-    from ndimreg.utils.image import prepare_benchmark_image
+    import os
+    import sys
 
-    images = list(Paths3DImageLoader(image_paths))
-
-    for im in images:
-        prepare_benchmark_image(
-            im,
-            normalize=normalize,
-            resize=resize,
-            spacing=spacing,
-            max_pad=max_pad,
-            safe_pad=safe_pad,
-        )
-
-    _start_napari(
-        images[::-1],
-        method,
-        "register",
-        spacing,
-        upsample_factor,
-        rotation_axis,
-        debug=debug,
-    )
-
-
-@app.command
-def transform(  # noqa: PLR0913
-    image_path: File,
-    method: RegistrationMethod3D = "keller",
-    resize: int | None = 64,
-    spacing: tuple[float, float, float] | None = None,
-    upsample_factor: PositiveInt = 1,
-    rotation_axis: RotationAxis3D = "z",
-    *,
-    normalize: bool = True,
-    max_pad: bool = False,
-    safe_pad: bool = False,
-    debug: bool = False,
-) -> None:
-    """Manually transform and auto-register the original image and a copy of it.
-
-    This mode can be used to test any 3D registration method by
-    transformed to be registered with the fixed image.
-    """
-    from ndimreg.image import Image3D
-    from ndimreg.utils.image import prepare_benchmark_image
-
-    images = [Image3D.from_path(image_path)]
-
-    for im in images:
-        prepare_benchmark_image(
-            im,
-            normalize=normalize,
-            resize=resize,
-            spacing=spacing,
-            max_pad=max_pad,
-            safe_pad=safe_pad,
-        )
-
-    _start_napari(
-        images,
-        method,
-        "transform",
-        spacing,
-        upsample_factor,
-        rotation_axis,
-        debug=debug,
-    )
-
-
-def _start_napari(  # noqa: PLR0913
-    images: Sequence[Image],
-    method: RegistrationMethod3D,
-    mode: Literal["transform", "register"],
-    spacing: tuple[float, float, float] | None,
-    upsample_factor: PositiveInt = 1,
-    rotation_axis: RotationAxis3D = "z",
-    *,
-    debug: bool = False,
-) -> None:
+    import napari
+    from loguru import logger
     from napari.layers import Image as NapariImage
+    from ndimreg.image import Paths3DImageLoader
+    from ndimreg.registration import (
+        Keller3DRegistration,
+        RotationAxis3DRegistration,
+        TranslationFFT3DRegistration,
+    )
+    from ndimreg.utils.image import prepare_benchmark_image
 
     from ._widget import TransformationWidget
 
-    registration = REGISTRATION_METHODS[method](
-        upsample_factor=upsample_factor,
-        axis=rotation_axis,
-        debug=debug,
-        rotation_axis_normalization=False,
-    )
+    logger.remove()
+    logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", log_level.upper()))
+
+    if not 1 <= len(image_paths) <= 2:  # noqa: PLR2004
+        print("Only one or two images allowed")
+        sys.exit(1)
+
+    images = [
+        prepare_benchmark_image(
+            im,
+            spacing=spacing,
+            normalize=normalize,
+            max_pad=max_pad,
+            safe_pad=safe_pad,
+            resize=resize,
+        )
+        for im in Paths3DImageLoader(image_paths)
+    ]
+
+    if len(images) == 1:
+        images = [images[0], images[0].copy()]
+
+    registration_methods = {
+        "keller": Keller3DRegistration,
+        "translation": TranslationFFT3DRegistration,
+        "rotationaxis": RotationAxis3DRegistration,
+    }
+
+    registration = registration_methods[method](axis=axis, debug=debug, **options)
 
     v = napari.Viewer()
     for im in images:
@@ -160,8 +92,6 @@ def _start_napari(  # noqa: PLR0913
 
     v.dims.ndisplay = 3
     v.window.add_dock_widget(
-        TransformationWidget(
-            viewer=v, registration=registration, mode=mode, spacing=spacing
-        )
+        TransformationWidget(viewer=v, registration=registration, spacing=spacing)
     )
     napari.run()
