@@ -75,6 +75,8 @@ def register(  # noqa: PLR0913
         for im in Paths3DImageLoader(image_paths)
     ]
 
+    # If only one image is provided, we use this image as 'fixed' and
+    # 'moving' image instead.
     if len(images) == 1:
         images = [images[0], images[0].copy()]
 
