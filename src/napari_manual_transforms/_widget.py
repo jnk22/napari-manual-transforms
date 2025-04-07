@@ -32,10 +32,6 @@ if TYPE_CHECKING:
     from ndimreg.image import Device
     from numpy.typing import NDArray
 
-__AVAILABLE_DEVICES: Final[set[Device]] = {"cpu", "gpu"}
-__DEVICE_ENV: Final = os.getenv("DEVICE", "cpu").lower().strip()
-__DEVICE: Final = __DEVICE_ENV if __DEVICE_ENV in __AVAILABLE_DEVICES else "cpu"
-
 
 def __strtobool(val: str) -> bool:
     val = val.lower()
@@ -47,6 +43,12 @@ def __strtobool(val: str) -> bool:
 
     msg = f"Invalid truth value: {val}"
     raise ValueError(msg)
+
+
+__AVAILABLE_DEVICES: Final[set[Device]] = {"cpu", "gpu"}
+__DEVICE_ENV: Final = os.getenv("DEVICE", "cpu").lower().strip()
+__DEVICE: Final = __DEVICE_ENV if __DEVICE_ENV in __AVAILABLE_DEVICES else "cpu"
+__RANDOM: Final = __strtobool(os.getenv("RANDOM", "False"))
 
 
 def norm_arr(image: NDArray, minx: float | None = None) -> NDArray:
@@ -74,21 +76,20 @@ class HashableArray:
 
 @cached(
     cache={},
-    key=lambda _registration, config, tform, _origin, _fixed, _moving: hashkey(
-        tform, config
-    ),
+    key=lambda *_args, **kwargs: hashkey(kwargs["config"], kwargs["transformation"]),
 )
-def update_images_cached(
+def register_images(
+    fixed: NDArray,
+    moving: NDArray,
+    *,
     registration: BaseRegistration,
     config: RegistrationConfig,
     transformation: HashableArray,
     origin: NDArray,
-    fixed: NDArray,
-    moving: NDArray,
 ) -> tuple[NDArray, list[Image]]:
     fixed = (
         transform(fixed, rotation=pr.random_quaternion(), dim=3)
-        if __strtobool(os.getenv("RANDOM", "False"))
+        if __RANDOM
         else fixed.copy()
     )
     moving = moving.copy()
@@ -128,20 +129,15 @@ def update_images_cached(
     logger.info(f"Final matrix:\n{full_matrix}")
 
     if registration.debug:
-        # FIX: Must be updated.
-        debug_images_2d = []
-        debug_images_3d = []
-        scale = (1,) * 3
-
-        # debug_images_2d = [
-        #     Image(np.expand_dims(im.data, axis=0), name=im.name)
-        #     for im in registration.debug_images["registration"]
-        # ]
-        # scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
-        # debug_images_3d = [
-        #     Image(im.data, name=im.name, scale=scale)
-        #     for im in registration.debug_images_3d["registration"]
-        # ]
+        debug_images_2d = [
+            Image(np.expand_dims(im.data, axis=0), name=im.name)
+            for im in result.get_debug_images(step="registration", dim=2, depth=0)
+        ]
+        debug_images_3d = [
+            Image(im.data, name=im.name)
+            for im in result.get_debug_images(step="registration", dim=3, depth=0)
+        ]
+        scale = (max(debug_images_2d[0].data.shape) / max(fixed.shape),) * 3
     else:
         debug_images_2d = []
         debug_images_3d = []
@@ -288,28 +284,23 @@ class TransformationWidget(LayerFollower, TransformationView):
         with self._model.valueChanged.blocked():
             self._active.affine = self._model.transform
             if self._auto_registration_checkbox.isChecked() and self._viewer:
-                tform_matrix, updated_layers = update_images_cached(
-                    self._registration,
-                    RegistrationConfig(self._model.config_threshold),
-                    HashableArray.from_ndarray(self._model.transform),
-                    self._model.origin,
+                tform_matrix, update_images = register_images(
                     *(x.data for x in self._viewer.layers[1::-1]),
+                    registration=self._registration,
+                    config=RegistrationConfig(self._model.config_threshold),
+                    transformation=HashableArray.from_ndarray(self._model.transform),
+                    origin=self._model.origin,
                 )
 
                 self._tform_matrix = tform_matrix
-                idx = 2
+                self._viewer.layers[2:] = update_images
 
-                if len(self._viewer.layers) == idx:
-                    self._viewer.layers.extend(updated_layers)
-                else:
-                    self._viewer.layers[idx:] = updated_layers
-
-                for layer in self._viewer.layers[:idx]:
+                for layer in self._viewer.layers[:2]:
                     layer.visible = False
 
                 # We set the current's view to the middle of the Z axis
                 # as convenience.
-                fixed_im = self._viewer.layers[idx]
+                fixed_im = self._viewer.layers[2]
                 z_mid_layer_index = fixed_im.data.shape[0] * fixed_im.scale[0] // 2
                 self._viewer.dims.set_point(0, z_mid_layer_index)
 
